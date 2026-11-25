@@ -26,16 +26,8 @@ jobs:
         run: |
           for f in *.js; do node --check "$f"; done
 
+      - name: Tests
+        run: npm test
+
       - name: Docker build
         run: docker build -t brightsign-signage:ci .
-
-  # Раскомментировать, когда появятся автотесты (npm test):
-  # test:
-  #   name: Tests
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: actions/setup-node@v4
-  #       with: { node-version: '22', cache: 'npm' }
-  #     - run: npm ci
-  #     - run: npm test

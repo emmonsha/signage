@@ -8,23 +8,57 @@
   .box { background:#fff; padding:30px; border-radius:8px; box-shadow:0 4px 10px rgba(0,0,0,.2); text-align:center; width:300px; }
   input { width:100%; padding:10px; margin:10px 0; box-sizing:border-box; border:1px solid #ccc; border-radius:4px; }
   button { background:#007bff; color:#fff; border:none; padding:10px 20px; border-radius:4px; cursor:pointer; width:100%; }
+  .hint { color:#7f8c8d; font-size:12px; margin:0; }
+  .err { color:#c0392b; font-size:13px; min-height:16px; margin:6px 0 0; }
 </style>
 </head>
 <body>
 <form class="box" onsubmit="login(event)">
   <h2>Управление экранами</h2>
-  <input type="password" id="pass" placeholder="Пароль" autofocus>
-  <button type="submit">Войти</button>
+  <input type="text" id="user" placeholder="Логин" autocomplete="username" style="display:none">
+  <input type="password" id="pass" placeholder="Пароль" autocomplete="current-password" autofocus>
+  <button type="submit" id="btn">Войти</button>
+  <p class="err" id="err"></p>
+  <p class="hint" id="hint"></p>
 </form>
 <script>
+// /api/auth сообщает, нужен ли ввод логина (вход через FreeIPA) и какой источник активен.
+(async () => {
+  try {
+    const a = await (await fetch('/api/auth')).json();
+    if (a.username) {
+      const u = document.getElementById('user');
+      u.style.display = '';
+      document.getElementById('pass').removeAttribute('autofocus');
+      u.focus();
+    }
+    document.getElementById('hint').textContent =
+      a.mode === 'freeipa' ? 'Вход по учётной записи FreeIPA' :
+      a.mode === 'both' ? 'FreeIPA или локальный администратор' : '';
+  } catch { /* сервер недоступен — форма всё равно отрисуется */ }
+})();
+
 async function login(e) {
   e.preventDefault();
-  const res = await fetch('/api/login', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password: document.getElementById('pass').value })
-  });
-  const data = await res.json();
-  if (data.success) location.reload(); else alert(data.message);
+  const err = document.getElementById('err'), btn = document.getElementById('btn');
+  err.textContent = ''; btn.disabled = true;
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: document.getElementById('user').value,
+        password: document.getElementById('pass').value
+      })
+    });
+    const data = await res.json();
+    if (data.success) { location.reload(); return; }
+    err.textContent = data.message || 'Не удалось войти';
+  } catch {
+    err.textContent = 'Сервер недоступен';
+  } finally {
+    btn.disabled = false;
+    document.getElementById('pass').value = '';
+  }
 }
 </script>
 </body>

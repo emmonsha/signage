@@ -12,6 +12,20 @@ services:
     environment:
       ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}   # рекомендуется (npm run hash-password); сервер сам сообщит, если пароль не задан
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}             # запасной вариант, открытый пароль
+      AUTH_MODE: ${AUTH_MODE:-}                       # local | freeipa | both (пусто = freeipa при FREEIPA_ENABLED, иначе local)
+      ADMIN_USER: ${ADMIN_USER:-admin}                # логин локального администратора (режимы local/both)
+      FREEIPA_ENABLED: ${FREEIPA_ENABLED:-false}
+      FREEIPA_URL: ${FREEIPA_URL:-}                   # ldaps://ipa.example.com:636 или ldap://ipa.example.com:389
+      FREEIPA_BASE_DN: ${FREEIPA_BASE_DN:-}
+      FREEIPA_USER_BASE_DN: ${FREEIPA_USER_BASE_DN:-}
+      FREEIPA_BIND_DN: ${FREEIPA_BIND_DN:-}           # сервисная учётка для поиска пользователей
+      FREEIPA_BIND_PASSWORD: ${FREEIPA_BIND_PASSWORD:-}
+      FREEIPA_USER_FILTER: ${FREEIPA_USER_FILTER:-(uid={username})}
+      FREEIPA_STARTTLS: ${FREEIPA_STARTTLS:-false}
+      FREEIPA_TLS_CA_FILE: ${FREEIPA_TLS_CA_FILE:-}
+      FREEIPA_TLS_REJECT_UNAUTHORIZED: ${FREEIPA_TLS_REJECT_UNAUTHORIZED:-true}
+      FREEIPA_TIMEOUT_MS: ${FREEIPA_TIMEOUT_MS:-5000}
+      FREEIPA_REQUIRE_GROUP: ${FREEIPA_REQUIRE_GROUP:-}
       ADMIN_ALLOWED_NETS: ${ADMIN_ALLOWED_NETS:-}     # например 192.168.0.0/16,10.0.0.0/8 — пусто = без ограничений
       SESSION_SECRET: ${SESSION_SECRET:-}            # необязательно, по умолчанию случайный при каждом старте
       SCREENS: ${SCREENS:-left,right,big_wall}

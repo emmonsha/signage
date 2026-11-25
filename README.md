@@ -53,6 +53,38 @@ docker compose ps          # статус должен стать healthy
 - **Проверьте воспроизведение на вашей модели BrightSign до боевого запуска**: потолок H.264 (профиль, уровень, 1080p60) зависит от модели плеера, а правила автозапуска и звука в HTML-виджете могут отличаться от браузера. Для более слабых моделей поставьте `VIDEO_MAX_FPS=30`. Сначала загрузите короткий тестовый ролик со звуком и без.
 - Без Docker нужен ffmpeg в системе (`apt install ffmpeg` / `brew install ffmpeg`); без него картинки работают, а видео отклоняется с понятным сообщением. Пути можно задать через `FFMPEG_PATH` и `FFPROBE_PATH`.
 
+## Вход через FreeIPA (LDAP)
+
+Кроме локального пароля админки можно включить вход по учётным записям каталога **FreeIPA**.
+Сервер находит пользователя в каталоге и проверяет пароль повторным bind-ом; пароль не сохраняется.
+
+```dotenv
+AUTH_MODE=both                       # local | freeipa | both
+ADMIN_USER=admin                     # аварийная локальная учётка (режим both)
+ADMIN_PASSWORD_HASH=<scrypt-хэш>     # npm run hash-password
+FREEIPA_ENABLED=true
+FREEIPA_URL=ldaps://ipa.example.com:636
+FREEIPA_BASE_DN=dc=example,dc=com
+FREEIPA_USER_BASE_DN=cn=users,cn=accounts,dc=example,dc=com
+FREEIPA_BIND_DN=uid=signage-bind,cn=users,cn=accounts,dc=example,dc=com
+FREEIPA_BIND_PASSWORD=<пароль сервисной учётки>
+FREEIPA_USER_FILTER=(uid={username})
+```
+
+- `AUTH_MODE`: `local` — только локальный пароль; `freeipa` — только каталог; `both` — каталог,
+  а при его недоступности аварийный вход локальной учёткой `ADMIN_USER`. Если не задано — `freeipa`,
+  когда `FREEIPA_ENABLED=true`, иначе `local`.
+- Сервисная учётка (`FREEIPA_BIND_DN`) нужна для поиска: FreeIPA по умолчанию запрещает анонимный
+  поиск. Заведите отдельного пользователя с правом чтения каталога.
+- Поддержаны `ldaps://` и `ldap://` + `FREEIPA_STARTTLS=true`. Для самоподписанного CA —
+  `FREEIPA_TLS_CA_FILE=/path/ca.crt` (либо `FREEIPA_TLS_REJECT_UNAUTHORIZED=false` только в тестовом контуре).
+- Ограничение по группе: `FREEIPA_REQUIRE_GROUP=cn=signage-admins,cn=groups,cn=accounts,dc=example,dc=com`.
+
+Безопасность: пустой пароль отклоняется (LDAP трактует его как анонимный bind и пускает), логин
+экранируется по RFC 4515 (защита от LDAP-инъекции), при нескольких совпадениях вход запрещён,
+недоступность каталога не даёт доступа, есть ограничение попыток. Полное описание и примеры —
+в `docs/03_FREEIPA_AUTH.md`. Тесты: `npm test`.
+
 ## Безопасность
 
 Три уровня, от простого к строгому:
@@ -128,6 +160,9 @@ docker compose start signage
 |---|---|---|
 | `ADMIN_PASSWORD_HASH` | хэш пароля админки (рекомендуется) | — |
 | `ADMIN_PASSWORD` | пароль в открытом виде (запасной вариант) | — |
+| `AUTH_MODE` | источник входа: `local` / `freeipa` / `both` | по FreeIPA, иначе local |
+| `ADMIN_USER` | логин локального администратора (режимы local/both) | admin |
+| `FREEIPA_*` | вход через FreeIPA (LDAP) — см. раздел «Вход через FreeIPA» | выкл. |
 | `ADMIN_ALLOWED_NETS` | сети, из которых доступна админка (CIDR через запятую) | без ограничений |
 | `PORT` | порт на хосте | 3000 |
 | `SCREENS` | имена экранов через запятую | left,right,big_wall |

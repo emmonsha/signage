@@ -8,6 +8,7 @@ const MemoryStore = require('memorystore')(session);
 const { processImage, openPdf, UserError, MAX_PDF_PAGES } = require('./processor');
 const video = require('./video');
 const auth = require('./auth');
+const freeipa = require('./freeipa');
 const { buildMatcher } = require('./netguard');
 
 const PORT = process.env.PORT || 3000;
@@ -17,28 +18,44 @@ const PORT = process.env.PORT || 3000;
 const SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 
 // ---------- аутентификация админки ----------
-// Предпочтительно ADMIN_PASSWORD_HASH (или ADMIN_PASSWORD_HASH_FILE, например Docker secret) — хранится хэш, а не пароль.
-// Запасной вариант: ADMIN_PASSWORD / ADMIN_PASSWORD_FILE (открытый пароль).
+// Два источника входа:
+//   1) локальная учётка администратора — ADMIN_PASSWORD_HASH (рекомендуется) или ADMIN_PASSWORD;
+//   2) каталог FreeIPA по LDAP (см. freeipa.js), включается FREEIPA_ENABLED=true.
+// Режим выбирает AUTH_MODE: local | freeipa | both. По умолчанию freeipa, если он включён, иначе local.
 const PROD = process.env.NODE_ENV === 'production';
-let PASSWORD_HASH, PASSWORD_PLAIN, ADMIN_NETS;
+let PASSWORD_HASH, PASSWORD_PLAIN, ADMIN_NETS, ADMIN_USER, IPA, AUTH_MODE;
 try {
     PASSWORD_HASH = auth.readEnvOrFile('ADMIN_PASSWORD_HASH', true);
     PASSWORD_PLAIN = auth.readEnvOrFile('ADMIN_PASSWORD');
     ADMIN_NETS = buildMatcher(process.env.ADMIN_ALLOWED_NETS);
+    IPA = freeipa.loadConfig();
 } catch (e) { console.error(e.message); process.exit(1); }
+
+ADMIN_USER = (process.env.ADMIN_USER || 'admin').trim() || 'admin';
+AUTH_MODE = (process.env.AUTH_MODE || (IPA ? 'freeipa' : 'local')).trim().toLowerCase();
+if (!['local', 'freeipa', 'both'].includes(AUTH_MODE)) {
+    console.error('AUTH_MODE: допустимы local | freeipa | both'); process.exit(1);
+}
+if ((AUTH_MODE === 'freeipa' || AUTH_MODE === 'both') && !IPA) {
+    console.error('AUTH_MODE=' + AUTH_MODE + ', но FreeIPA не настроен: задайте FREEIPA_ENABLED=true и параметры FREEIPA_* (см. .env.example)');
+    process.exit(1);
+}
+const LOCAL_LOGIN = AUTH_MODE === 'local' || AUTH_MODE === 'both';
+const IPA_LOGIN = (AUTH_MODE === 'freeipa' || AUTH_MODE === 'both') && !!IPA;
 
 if (PASSWORD_HASH && !auth.isValidHash(PASSWORD_HASH)) {
     console.error('ADMIN_PASSWORD_HASH имеет неверный формат. Создайте новый: npm run hash-password');
     process.exit(1);
 }
-if (!PASSWORD_HASH && !PASSWORD_PLAIN) {
+// Локальный пароль нужен только если он реально участвует в проверке.
+if (LOCAL_LOGIN && !PASSWORD_HASH && !PASSWORD_PLAIN) {
     if (PROD) { console.error('Задайте ADMIN_PASSWORD_HASH (рекомендуется) или ADMIN_PASSWORD (см. .env.example)'); process.exit(1); }
     PASSWORD_PLAIN = 'change-me';
 }
-if (PROD && PASSWORD_PLAIN === 'change-me' && !PASSWORD_HASH) { console.error('Задайте настоящий пароль админки'); process.exit(1); }
+if (LOCAL_LOGIN && PROD && PASSWORD_PLAIN === 'change-me' && !PASSWORD_HASH) { console.error('Задайте настоящий пароль админки'); process.exit(1); }
 
 const sha = s => crypto.createHash('sha256').update(String(s)).digest();
-async function checkPassword(input) {
+async function checkLocalPassword(input) {
     if (typeof input !== 'string') return false;                   // в JSON может прийти число/объект
     if (PASSWORD_HASH) return auth.verifyPassword(input, PASSWORD_HASH);
     return crypto.timingSafeEqual(sha(input), sha(PASSWORD_PLAIN));
@@ -223,24 +240,69 @@ app.use('/uploads', express.static(UPLOADS, { maxAge: '7d', immutable: true }));
 const checkAuth = (req, res, next) =>
     req.session.authorized ? next() : res.status(401).json({ success: false, message: 'Нужна авторизация' });
 
-// простое ограничение попыток входа
+// Простое ограничение попыток входа: отдельно по IP и по паре IP+логин (защита от перебора паролей).
 const fails = new Map();
-app.post('/api/login', async (req, res) => {
-    const ip = req.ip, rec = fails.get(ip) || { n: 0, until: 0 };
-    if (Date.now() < rec.until) return res.status(429).json({ success: false, message: 'Слишком много попыток, подождите' });
-    let ok = false;
-    try { ok = await checkPassword(req.body.password); } catch (e) { console.error('Ошибка проверки пароля:', e.message); }
-    if (ok) {
-        fails.delete(ip);
-        req.session.authorized = true;
-        return res.json({ success: true });
-    }
+const FAIL_LIMIT = 5, FAIL_WINDOW = 15 * 60 * 1000;
+const failKey = (req, user) => `${req.ip}|${String(user || '').toLowerCase()}`;
+function throttled(key) {
+    const rec = fails.get(key) || { n: 0, until: 0 };
+    return Date.now() < rec.until ? rec : null;
+}
+function bumpFail(key) {
+    const rec = fails.get(key) || { n: 0, until: 0 };
     rec.n++;
-    if (rec.n >= 5) { rec.n = 0; rec.until = Date.now() + 15 * 60 * 1000; }
-    fails.set(ip, rec);
-    res.status(401).json({ success: false, message: 'Неверный пароль' });
+    if (rec.n >= FAIL_LIMIT) { rec.n = 0; rec.until = Date.now() + FAIL_WINDOW; }
+    fails.set(key, rec);
+}
+
+// Проверяет логин/пароль по выбранному источнику. Возвращает { ok, user?, reason? }.
+// Сетевые/серверные ошибки FreeIPA не «пускают» и не «валидят» вход — они лишь логируются.
+// В режиме both локальная учётка ADMIN_USER — аварийный вход: она проверяется, когда FreeIPA
+// не пустил (нет такого пользователя, неверный пароль или каталог недоступен).
+async function checkCredentials(username, password) {
+    const login = typeof username === 'string' && username.trim() ? username.trim() : ADMIN_USER;
+    if (IPA_LOGIN) {
+        try {
+            const r = await freeipa.authenticate(IPA, login, password);
+            if (r.ok) return { ok: true, user: r.user, via: 'freeipa' };
+            if (r.reason === 'bad-password' || r.reason === 'not-found' || r.reason === 'not-in-group' || r.reason === 'ambiguous') {
+                console.warn(`LDAP: отказ для «${login}» (${r.reason})`);
+            } else {
+                console.warn(`LDAP: не проверялся для «${login}» (${r.reason})`);
+            }
+        } catch (e) {
+            console.error('LDAP недоступен:', e.code || e.message);
+        }
+        // В режиме only-freeipa аварийного локального входа нет.
+        if (!LOCAL_LOGIN) return { ok: false, reason: 'Неверный логин или пароль' };
+    }
+    if (LOCAL_LOGIN && login.toLowerCase() === ADMIN_USER.toLowerCase()) {
+        let ok = false;
+        try { ok = await checkLocalPassword(password); } catch (e) { console.error('Ошибка проверки пароля:', e.message); }
+        if (ok) return { ok: true, user: { username: ADMIN_USER, displayName: ADMIN_USER }, via: 'local' };
+    }
+    return { ok: false, reason: 'Неверный логин или пароль' };
+}
+
+app.post('/api/login', async (req, res) => {
+    const username = typeof req.body.username === 'string' ? req.body.username : '';
+    const keys = [req.ip, failKey(req, username)];                 // блокируем и по IP, и по IP+логину
+    if (keys.some(throttled)) return res.status(429).json({ success: false, message: 'Слишком много попыток, подождите' });
+    const r = await checkCredentials(username, req.body.password);
+    if (r.ok) {
+        keys.forEach(k => fails.delete(k));
+        req.session.authorized = true;
+        req.session.user = r.user;                                // для отображения в админке/логах
+        console.log(`Вход разрешён: ${r.user.username} (${r.via}) с ${req.ip}`);
+        return res.json({ success: true, user: { username: r.user.username, displayName: r.user.displayName } });
+    }
+    keys.forEach(bumpFail);
+    res.status(401).json({ success: false, message: r.reason || 'Неверный логин или пароль' });
 });
 app.post('/api/logout', (req, res) => req.session.destroy(() => res.json({ success: true })));
+
+// Публичная подсказка для страницы входа: нужен ли ввод логина и какой источник активен.
+app.get('/api/auth', (req, res) => res.json({ mode: AUTH_MODE, username: IPA_LOGIN || AUTH_MODE === 'both' }));
 
 app.get('/admin', (req, res) =>
     res.sendFile(path.join(PUBLIC, req.session.authorized ? 'admin.html' : 'login.html')));
@@ -460,7 +522,8 @@ app.use((err, req, res, next) => {           // ошибки multer (напри�
 const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Админка: http://localhost:${PORT}/admin`);
     SCREENS.forEach(n => console.log(`Плеер ${n}: http://<IP>:${PORT}/player?screen=${n}`));
-    if (!PASSWORD_HASH) console.warn('⚠ Используется открытый ADMIN_PASSWORD. Лучше ADMIN_PASSWORD_HASH: npm run hash-password');
+    if (!PASSWORD_HASH && LOCAL_LOGIN) console.warn('⚠ Используется открытый ADMIN_PASSWORD. Лучше ADMIN_PASSWORD_HASH: npm run hash-password');
+    console.log(`Аутентификация: ${AUTH_MODE}` + (IPA_LOGIN ? ` (FreeIPA: ${IPA.url}, база ${IPA.userBaseDn})` : ''));
     console.log(ADMIN_NETS ? `Админка ограничена: ${process.env.ADMIN_ALLOWED_NETS}` : '⚠ ADMIN_ALLOWED_NETS не задан: админка доступна из любой сети');
 });
 
