@@ -793,6 +793,26 @@ app.post('/api/default', checkAuth, upload.single('image'), async (req, res) => 
     }
 });
 
+// Скопировать уже загруженную заглушку этого экрана на остальные (галочка «на всех экранах»).
+// Нужен, когда галочку ставят ПОСЛЕ загрузки картинки: файл уже обработан и лежит в /uploads,
+// повторно загружать его не нужно — просто прописываем тот же URL другим экранам.
+app.post('/api/default/copy', checkAuth, (req, res) => {
+    const src = String((req.body || {}).screen || '');
+    if (!validScreen(src)) return res.status(400).json({ success: false, message: 'Неверный экран' });
+    const url = readPlaylist(src).default_image;
+    if (!url) return res.status(400).json({ success: false, message: 'На этом экране ещё нет заглушки' });
+    const others = SCREENS.filter(n => n !== src);
+    const old = [];
+    others.forEach(n => {
+        const d = readPlaylist(n);
+        if (d.default_image && d.default_image !== url) old.push(d.default_image);
+        d.default_image = url;
+        writePlaylist(n, d);
+    });
+    old.forEach(removeFileIfUnused);
+    res.json({ success: true, screens: [src, ...others], url });
+});
+
 app.post('/api/default/delete', checkAuth, (req, res) => {
     const t = targets(req.body.screen);
     if (!t) return res.status(400).json({ success: false });
