@@ -109,3 +109,44 @@ test('плейлист доступен только по токену', async (
         fs.rmSync(dir, { recursive: true, force: true });
     }
 });
+
+test('старый формат heartbeat (screen) отклоняется с подсказкой', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-api-'));
+    const port = 4100 + Math.floor(Math.random() * 90);
+    const hash = await hashPassword(PASSWORD);
+    const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+        env: { ...process.env, PORT: String(port), STORAGE_DIR: dir, ADMIN_PASSWORD_HASH: hash,
+               AUTH_MODE: 'local', ADMIN_USER: 'admin', SCREENS: 'left', NODE_ENV: 'test' },
+        stdio: 'ignore'
+    });
+    try {
+        assert.ok(await waitHealth(port), 'сервер не поднялся');
+        // старый формат: имя вместо токена -> 400 + hint
+        const old = await fetch(`http://127.0.0.1:${port}/api/heartbeat`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ screen: 'left', kind: 'slide', slideId: 'x' })
+        });
+        assert.equal(old.status, 400);
+        const body = await old.json();
+        assert.equal(body.ok, false);
+        assert.match(body.hint, /token/);
+
+        // новый формат: по токену экрана -> 200 и статус
+        const login = await fetch(`http://127.0.0.1:${port}/api/login`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: 'admin', password: PASSWORD })
+        });
+        const cookie = login.headers.get('set-cookie').split(';')[0];
+        const scr = (await (await fetch(`http://127.0.0.1:${port}/api/screens`, { headers: { cookie } })).json()).screens[0];
+        const ok = await fetch(`http://127.0.0.1:${port}/api/heartbeat`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: scr.token, kind: 'slide', slideId: 'y', duration: 5000 })
+        });
+        assert.equal(ok.status, 200);
+        const st = await (await fetch(`http://127.0.0.1:${port}/api/status`, { headers: { cookie } })).json();
+        assert.equal(st.screens.left.kind, 'slide');
+    } finally {
+        child.kill('SIGKILL');
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});

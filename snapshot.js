@@ -158,4 +158,31 @@ function parseAddress(input) {
     return { host, ...(port ? { port } : {}), ...(scheme ? { scheme } : {}) };
 }
 
-module.exports = { loadConfig, credentialsFor, capture, parseAddress, buildAuthHeader, parseChallenge, rawRequest, bool };
+// ---------- понятные подсказки к ошибкам ----------
+// Превращает техническую ошибку в сообщение с действием для администратора.
+// Возвращает строку для UI/лога; исходный текст сохраняется в конце.
+function describeError(e, ctx = {}) {
+    const msg = String((e && e.message) || e || '');
+    const code = e && e.code;
+    const screen = ctx.screen ? `«${ctx.screen}»` : '';
+    const hint = (text) => `${text}${screen ? ` (экран ${screen})` : ''}`;
+
+    const http = msg.match(/HTTP (\d{3})/);
+    if (http) {
+        const s = Number(http[1]);
+        if (s === 401) return hint('Local DWS требует авторизации, но пароль не подошёл. Проверьте BRIGHTSIGN_DWS_USER/BRIGHTSIGN_DWS_PASSWORD в .env — пароль должен быть от локальной учётки самого плеера (не от FreeIPA). Если пароль задан отдельно для этого экрана — BRIGHTSIGN_DWS_<ИМЯ>_PASSWORD. После правки: docker compose up -d --force-recreate.') + ` [${msg}]`;
+        if (s === 403) return hint('Плеер отклонил запрос: выключен Local DWS или закрыт удалённый доступ. Включите Local DWS в настройках плеера и разрешите удалённый доступ.') + ` [${msg}]`;
+        if (s === 404 && /файл|files|снапшот/i.test(msg)) return hint('Файл снапшота не найден: путь remote_snapshots на этой модели другой. Проверьте вручную поле filename из POST /api/v1/snapshot через curl.') + ` [${msg}]`;
+        if (s === 404) return hint('Плеер не знает такой адрес API: проверьте модель/прошивку (нужен BrightSign Local DWS).') + ` [${msg}]`;
+        if (s === 429) return hint('Плеер ограничил частоту запросов: подождите и попробуйте снова.') + ` [${msg}]`;
+        return hint(`Плеер ответил HTTP ${s}.`) + ` [${msg}]`;
+    }
+    if (code === 'ECONNREFUSED') return hint('Сервер не смог подключиться к плееру: проверьте IP и порт в поле «IP плеера», а также что Local DWS включён.') + ` [${msg}]`;
+    if (code === 'ENOTFOUND') return hint('Имя плеера не разрешается: укажите IP вместо имени или поправьте DNS.') + ` [${msg}]`;
+    if (code === 'ETIMEDOUT' || /таймаут/i.test(msg)) return hint('Плеер не ответил вовремя: сеть/файрвол или плеер занят. При медленной сети можно увеличить SNAPSHOT_TIMEOUT_MS.') + ` [${msg}]`;
+    if (code === 'ECONNRESET') return hint('Соединение с плеером разорвано: проверьте, не блокирует ли канл файрвол.') + ` [${msg}]`;
+    if (code === 'CERT_HAS_EXPIRED' || /certificate|self.signed/i.test(msg)) return hint('Проблема с TLS-сертификатом плеера: для локальных плееров обычно достаточно http, либо отключите проверку сертификата.') + ` [${msg}]`;
+    return hint('Не удалось снять кадр.') + ` [${msg}]`;
+}
+
+module.exports = { loadConfig, credentialsFor, capture, parseAddress, buildAuthHeader, parseChallenge, rawRequest, bool, describeError };

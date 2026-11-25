@@ -590,10 +590,23 @@ app.post('/api/delete', checkAuth, (req, res) => {
 
 // ---------- состояние плееров (в памяти, плеер шлёт "пульс" каждые 10 сек и при смене слайда) ----------
 const playerState = {};
+let legacyHeartbeatWarned = false;   // однократное предупреждение о старой ссылке
 app.post('/api/heartbeat', (req, res) => {
     const b = req.body || {};
     const s = screenByToken(b.token);
-    if (!s) return res.status(400).json({ ok: false });
+    if (!s) {
+        // Старый формат ссылки (/player?screen=<имя>) шлёт имя вместо токена.
+        // Такая ссылка всегда отдаёт 400 — плеер молчит, и лампочка в админке остаётся серой.
+        if (b.screen && !b.token) {
+            if (!legacyHeartbeatWarned) {
+                legacyHeartbeatWarned = true;
+                console.warn(`Плеер шлёт heartbeat СТАРОГО формата (screen=${String(b.screen).slice(0, 32)}). ` +
+                    'Ссылка перевыпущена на формат /player?token=<...>: обновите адрес в BrightAuthor (поле «Ссылка плеера» в админке).');
+            }
+            return res.status(400).json({ ok: false, hint: 'Устаревшая ссылка: откройте /player?token=<токен> из админки' });
+        }
+        return res.status(400).json({ ok: false });
+    }
     const n = s.id, now = Date.now();
     const kind = ['slide', 'default', 'black'].includes(b.kind) ? b.kind : 'black';
     const slideId = typeof b.slideId === 'string' ? b.slideId.slice(0, 64) : null;
@@ -648,7 +661,8 @@ app.post('/api/snapshot/:screen', checkAuth, async (req, res) => {
         res.json({ success: true, file: name, width: shot.width, height: shot.height, deviceName: shot.deviceName, count: list.length });
     } catch (e) {
         console.error(`Снапшот ${screen}: ${e.code || e.message}`);
-        res.status(502).json({ success: false, message: `Не удалось снять кадр: ${e.message}` });
+        const s = screenById(screen);
+        res.status(502).json({ success: false, message: snapshot.describeError(e, { screen: (s && s.name) || screen }) });
     }
 });
 

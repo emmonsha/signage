@@ -131,3 +131,37 @@ test('capture: https и кастомный порт попадают в URL', as
     await snap.capture(cfg({ BRIGHTSIGN_DWS_SCHEME: 'https' }), { host: 'p.local', port: 8443 }, { user: 'a', password: 'b' }, { rawRequest: raw });
     assert.ok(urls.every(u => u.startsWith('https://p.local:8443/')), JSON.stringify(urls));
 });
+
+// ---------- понятные сообщения об ошибках (describeError) ----------
+test('describeError: HTTP 401 -> подсказка про .env и пароль DWS', () => {
+    const m = snap.describeError(new Error('DWS /snapshot: HTTP 401'), { screen: 'left' });
+    assert.match(m, /BRIGHTSIGN_DWS_PASSWORD/);
+    assert.match(m, /левый|left/);
+    assert.match(m, /HTTP 401/);
+});
+test('describeError: HTTP 403 -> подсказка про выключенный Local DWS', () => {
+    assert.match(snap.describeError(new Error('DWS /snapshot: HTTP 403'), {}), /Local DWS/);
+});
+test('describeError: HTTP 404 при скачивании -> путь remote_snapshots', () => {
+    assert.match(snap.describeError(new Error('DWS файл снапшота: HTTP 404'), {}), /remote_snapshots/);
+});
+test('describeError: ECONNREFUSED -> проверьте IP и порт', () => {
+    const e = new Error('connect ECONNREFUSED 192.168.1.50:80'); e.code = 'ECONNREFUSED';
+    assert.match(snap.describeError(e, { screen: 'right' }), /IP и порт/);
+});
+test('describeError: ENOTFOUND -> имя не разрешается', () => {
+    const e = new Error('getaddrinfo ENOTFOUND player.local'); e.code = 'ENOTFOUND';
+    assert.match(snap.describeError(e, {}), /не разрешается/);
+});
+test('describeError: таймаут -> SNAPSHOT_TIMEOUT_MS', () => {
+    const e = new Error('таймаут запроса к DWS'); e.code = 'ETIMEDOUT';
+    assert.match(snap.describeError(e, {}), /SNAPSHOT_TIMEOUT_MS/);
+});
+test('describeError: неизвестная ошибка -> общий текст с исходником', () => {
+    const m = snap.describeError(new Error('что-то пошло не так'), {});
+    assert.match(m, /Не удалось снять кадр/);
+    assert.match(m, /что-то пошло не так/);
+});
+test('describeError: имя экрана (screen) попадает в текст', () => {
+    assert.match(snap.describeError(new Error('HTTP 500'), { screen: 'big_wall' }), /big_wall/);
+});
