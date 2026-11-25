@@ -104,6 +104,22 @@ SNAPSHOT_KEEP=20                    # сколько последних кадр
 Авторизация DWS — Digest (fallback Basic). Для конкретного экрана можно переопределить
 логин/пароль: `BRIGHTSIGN_DWS_BIG_WALL_PASSWORD=…`. Подробнее — `docs/04_SNAPSHOTS.md`.
 
+## Автодеплой «одной кнопкой»
+
+Кнопка «⬆ Обновить систему» в админке обновляет signage до последнего коммита ветки:
+контейнер шлёт команду мини-агенту на хосте (`deploy-agent.js`), тот делает `git pull` +
+`docker compose up -d --build`. Источник — self-hosted GitLab (deploy key). Всё в `.env`:
+
+```dotenv
+DEPLOY_ENABLED=true
+DEPLOY_AGENT_URL=http://127.0.0.1:9123
+DEPLOY_AGENT_TOKEN=<общий токен с агентом>
+```
+
+Установка агента на сервере: `scripts/install-deploy-agent.sh` (systemd-сервис, токен, deploy key).
+Контейнер запускается в host-сети: `docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d --build`.
+Подробно — `docs/05_AUTODEPLOY.md`.
+
 ## Безопасность
 
 Три уровня, от простого к строгому:
@@ -186,6 +202,8 @@ docker compose start signage
 | `BRIGHTSIGN_DWS_SCHEME`, `BRIGHTSIGN_DWS_PORT` | схема/порт DWS | http, 80 |
 | `BRIGHTSIGN_SNAPSHOT_ORIGINAL` | снимать кадр в оригинальном разрешении | true |
 | `SNAPSHOT_KEEP` | сколько последних кадров хранить на экран | 20 |
+| `DEPLOY_ENABLED` | кнопка «Обновить систему» (автодеплой) | false |
+| `DEPLOY_AGENT_URL`, `DEPLOY_AGENT_TOKEN` | адрес и токен мини-агента деплоя | 127.0.0.1:9123, — |
 | `ADMIN_ALLOWED_NETS` | сети, из которых доступна админка (CIDR через запятую) | без ограничений |
 | `PORT` | порт на хосте | 3000 |
 | `SCREENS` | имена экранов через запятую | left,right,big_wall |

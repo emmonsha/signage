@@ -76,8 +76,15 @@
 <body>
 <header>
   <h1>Управление экранами</h1>
-  <button class="btn" onclick="logout()">Выйти</button>
+  <div>
+    <button class="btn" id="deployBtn" style="display:none;background:#6f42c1;color:#fff" onclick="doDeploy()">⬆ Обновить систему</button>
+    <button class="btn" onclick="logout()">Выйти</button>
+  </div>
 </header>
+<div id="deployBox" style="display:none" class="box">
+  <strong>⬆ Автодеплой</strong> <span id="deployMsg" class="snapinfo"></span>
+  <pre id="deployLog" style="max-height:220px;overflow:auto;background:#0d1117;color:#c9d1d9;padding:8px;border-radius:4px;font-size:11px;margin-top:6px;white-space:pre-wrap"></pre>
+</div>
 <div class="screens" id="screens">Загрузка…</div>
 
 <div class="modal" id="modal">
@@ -511,6 +518,45 @@ function markPlaying(i) {
 
 async function logout() { await fetch('/api/logout', { method: 'POST' }); location.reload(); }
 
+// ---------- автодеплой ----------
+let deployPoll = null;
+async function initDeploy() {
+  let d;
+  try { d = await api('/api/deploy'); } catch { return; }
+  if (!d.enabled) return;
+  $('deployBtn').style.display = '';
+  $('deployBox').style.display = '';
+  renderDeploy(d);
+  if (d.running) startDeployPoll();
+}
+function renderDeploy(d) {
+  const msg = $('deployMsg'), log = $('deployLog');
+  if (d.running) msg.textContent = `Идёт деплой (${d.step || '…'})…`;
+  else if (d.ok_last === true) msg.textContent = `Готово: ${d.from || '?'} → ${d.to || '?'}`;
+  else if (d.ok_last === false) msg.textContent = `Ошибка: ${d.error || 'см. лог'}`;
+  else if (d.message) msg.textContent = d.message;
+  else msg.textContent = 'Система готова к обновлению';
+  msg.style.color = d.ok_last === false ? '#c0392b' : d.running ? '#007bff' : '#28a745';
+  log.textContent = d.log || '';
+  $('deployBtn').disabled = !!d.running;
+}
+async function doDeploy() {
+  if (!confirm('Обновить систему: git pull + пересборка контейнера? Сервис ненадолго станет недоступен.')) return;
+  const r = await postJson('/api/deploy', {});
+  if (!r.success) return alert(r.message || 'Не удалось запустить деплой');
+  $('deployMsg').textContent = 'Деплой запущен…';
+  startDeployPoll();
+}
+function startDeployPoll() {
+  if (deployPoll) return;
+  $('deployBtn').disabled = true;
+  deployPoll = setInterval(async () => {
+    let d; try { d = await api('/api/deploy'); } catch { return; }
+    renderDeploy(d);
+    if (!d.running) { clearInterval(deployPoll); deployPoll = null; }
+  }, 3000);
+}
+
 // ---------- снапшоты экрана ----------
 async function loadAddr(i) {
   try {
@@ -563,6 +609,7 @@ async function delSnap(i, f) {
   build();
   await load();
   SCREENS.forEach(i => { loadAddr(i); loadSnaps(i); });
+  initDeploy();
   loadStatus();
   setInterval(load, 10000);
   setInterval(loadStatus, 5000);

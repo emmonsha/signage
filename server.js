@@ -10,6 +10,7 @@ const video = require('./video');
 const auth = require('./auth');
 const freeipa = require('./freeipa');
 const snapshot = require('./snapshot');
+const deploy = require('./deploy');
 const { buildMatcher } = require('./netguard');
 
 const PORT = process.env.PORT || 3000;
@@ -78,6 +79,11 @@ fs.mkdirSync(UPLOADS, { recursive: true });
 // Кадры хранятся в STORAGE/snapshots/<screen>/, хранится последние SNAPSHOT_KEEP штук.
 let SNAP;
 try { SNAP = snapshot.loadConfig(); }
+catch (e) { console.error(e.message); process.exit(1); }
+
+// ---------- автодеплой (кнопка «Обновить» -> мини-агент на хосте) ----------
+let DEPLOY;
+try { DEPLOY = deploy.loadConfig(); }
 catch (e) { console.error(e.message); process.exit(1); }
 const PLAYERS_FILE = path.join(DATA, 'players.json');
 const SNAPSHOT_DIR = path.join(STORAGE, 'snapshots');
@@ -576,6 +582,26 @@ app.post('/api/snapshot/:screen/delete', checkAuth, (req, res) => {
     res.json({ success: true, files: listSnapshots(screen) });
 });
 
+// ---------- автодеплой: кнопка «Обновить» -> мини-агент на хосте ----------
+// Доступно только при DEPLOY_ENABLED=true. Сама пересборка — на хосте (deploy-agent.js).
+app.get('/api/deploy', checkAuth, async (req, res) => {
+    if (!DEPLOY) return res.json({ enabled: false });
+    try { res.json({ enabled: true, ...(await deploy.status(DEPLOY)) }); }
+    catch (e) { res.status(502).json({ enabled: true, ok: false, message: `Агент деплоя недоступен: ${e.message}` }); }
+});
+
+app.post('/api/deploy', checkAuth, async (req, res) => {
+    if (!DEPLOY) return res.status(400).json({ success: false, message: 'Автодеплой выключен (DEPLOY_ENABLED=true в .env)' });
+    try {
+        const r = await deploy.trigger(DEPLOY);
+        console.log(`Деплой запущен пользователем ${req.session.user ? req.session.user.username : '?'} с ${req.ip}`);
+        res.json({ success: true, started: r.started, message: r.message });
+    } catch (e) {
+        console.error('Деплой:', e.message);
+        res.status(502).json({ success: false, message: `Не удалось запустить деплой: ${e.message}` });
+    }
+});
+
 // ---------- заглушка (default_image хранится в плейлисте экрана) ----------
 // screen = 1|2|3 или "all"
 const targets = s => s === 'all' ? SCREENS : (validScreen(s) ? [String(s)] : null);
@@ -632,6 +658,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     SCREENS.forEach(n => console.log(`Плеер ${n}: http://<IP>:${PORT}/player?screen=${n}`));
     if (!PASSWORD_HASH && LOCAL_LOGIN) console.warn('⚠ Используется открытый ADMIN_PASSWORD. Лучше ADMIN_PASSWORD_HASH: npm run hash-password');
     console.log(`Аутентификация: ${AUTH_MODE}` + (IPA_LOGIN ? ` (FreeIPA: ${IPA.url}, база ${IPA.userBaseDn})` : ''));
+    console.log(DEPLOY ? `Автодеплой включён: агент ${DEPLOY.url}` : 'Автодеплой выключен (DEPLOY_ENABLED=true для кнопки «Обновить»)');
     console.log(ADMIN_NETS ? `Админка ограничена: ${process.env.ADMIN_ALLOWED_NETS}` : '⚠ ADMIN_ALLOWED_NETS не задан: админка доступна из любой сети');
 });
 

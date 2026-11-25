@@ -1,0 +1,15 @@
+# Вариант запуска signage в сети хоста (network_mode: host).
+#
+# Зачем: мини-агент автодеплоя слушает loopback (127.0.0.1) на хосте, а контейнер в bridge-сети
+# достучаться до хостового loopback не может. С host-сетью контейнер и хост делят один
+# сетевой стек, поэтому DEPLOY_AGENT_URL=http://127.0.0.1:9123 работает как задумано.
+#
+# Применение:
+#   docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d --build
+#
+# Требуется Docker Compose >= 2.24 (поддержка `!reset` для сброса списка портов).
+# В host-сети маппинг портов не нужен и отключён — сервис слушает 0.0.0.0:PORT напрямую.
+services:
+  signage:
+    network_mode: host
+    ports: !reset []

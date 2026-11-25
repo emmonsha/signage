@@ -44,6 +44,9 @@ services:
       BRIGHTSIGN_SNAPSHOT_ORIGINAL: ${BRIGHTSIGN_SNAPSHOT_ORIGINAL:-true}
       SNAPSHOT_KEEP: ${SNAPSHOT_KEEP:-20}
       SNAPSHOT_TIMEOUT_MS: ${SNAPSHOT_TIMEOUT_MS:-15000}
+      DEPLOY_ENABLED: ${DEPLOY_ENABLED:-false}
+      DEPLOY_AGENT_URL: ${DEPLOY_AGENT_URL:-http://127.0.0.1:9123}
+      DEPLOY_AGENT_TOKEN: ${DEPLOY_AGENT_TOKEN:-}
       TZ: ${TZ:-UTC}
     volumes:
       - storage:/storage                          # плейлисты (data/) и картинки (uploads/)

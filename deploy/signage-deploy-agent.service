@@ -1,0 +1,27 @@
+[Unit]
+Description=BrightSign signage deploy agent
+Documentation=https://github.com/emmonsha/brightsign-signage
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=signage
+Group=docker
+# Настройки — в этом файле (создаётся scripts/install-deploy-agent.sh), права 600.
+EnvironmentFile=/etc/signage/deploy-agent.env
+WorkingDirectory=/opt/signage
+ExecStart=/usr/bin/node /opt/signage/deploy-agent.js
+Restart=on-failure
+RestartSec=5
+# Агент — узкая дверь: только loopback, никаких лишних прав.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/signage
+# Docker CLI и git должны быть в PATH
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+[Install]
+WantedBy=multi-user.target

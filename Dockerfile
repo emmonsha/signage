@@ -14,7 +14,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
-COPY server.js processor.js video.js auth.js netguard.js freeipa.js snapshot.js hash-password.js ./
+COPY server.js processor.js video.js auth.js netguard.js freeipa.js snapshot.js deploy.js hash-password.js ./
 COPY public ./public
 
 USER node
