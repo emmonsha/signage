@@ -16,7 +16,8 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 # --chmod: при строгом umask на хосте (027/077) файлы приходят как 600/700, и
 # непривилегированный пользователь node их не прочитает. Задаём права при копировании.
-COPY --chmod=0755 server.js processor.js video.js auth.js netguard.js freeipa.js snapshot.js deploy.js hash-password.js screens.js ./
+COPY --chmod=0755 server.js processor.js video.js auth.js netguard.js freeipa.js snapshot.js \
+     deploy.js hash-password.js screens.js session-store.js ./
 COPY --chmod=0755 public ./public
 
 USER node

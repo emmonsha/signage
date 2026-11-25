@@ -72,6 +72,12 @@
   .snaphist .it { position:relative; width:72px; }
   .snaphist img { width:72px; height:40px; object-fit:cover; border-radius:3px; border:1px solid #ddd; display:block; cursor:pointer; }
   .snaphist .it button { position:absolute; top:-6px; right:-6px; border:none; background:#c0392b; color:#fff; border-radius:50%; width:16px; height:16px; font-size:10px; line-height:16px; padding:0; cursor:pointer; }
+  .legacy-banner {
+    margin:10px 0; padding:10px 12px; border-radius:8px; font-size:13px;
+    border-left:4px solid #b45309; background:#fff7ed; color:#7c2d12;
+  }
+  .legacy-banner strong { display:block; margin-bottom:3px; }
+  .legacy-banner code { background:#ffedd5; padding:1px 4px; border-radius:3px; }
   details.snapdet { margin-top:6px; }
   details.snapdet > summary { cursor:pointer; color:#007bff; }
   details.snapdet[open] > summary { margin-bottom:6px; }
@@ -794,6 +800,7 @@ function build() {
       </details>
     </div>
 
+    <div id="legacy-${i}" class="legacy-banner" hidden></div>
     <div id="jobs-${i}" hidden></div>
     <div class="cycle" id="cycle-${i}"></div>
     <div id="active-${i}"></div>
@@ -1109,10 +1116,29 @@ async function loadStatus() {
     const r = await fetch('/api/status');
     if (!r.ok) return;
     sstat = await r.json(); statAt = Date.now();
-    SCREENS.forEach(i => { statusLine(i); markPlaying(i); });
+    SCREENS.forEach(i => { statusLine(i); markPlaying(i); legacyBanner(i); });
   } catch {}
 }
 function online(s) { return sstat.serverTime - s.lastSeen + (Date.now() - statAt) < 35000; }
+
+// Плеер шлёт heartbeat старого формата (/player?screen=...) — значит, в BrightAuthor
+// прописан устаревший адрес. Лампочка при этом серая, и причина неочевидна: показываем её.
+function legacyBanner(i) {
+  const el = $(`legacy-${i}`);
+  if (!el) return;
+  const L = sstat.legacy && sstat.legacy[i];
+  const s = sstat.screens[i];
+  if (!L || (s && online(s))) { el.hidden = true; el.innerHTML = ''; return; }
+  const mins = Math.max(1, Math.round((Date.now() - statAt + (sstat.serverTime - L.at)) / 60000));
+  el.innerHTML =
+    `<strong>⚠ Плеер обращается по устаревшей ссылке</strong>` +
+    `Последний раз: ${mins} мин назад с ${esc(L.ip || '?')}. ` +
+    `Лампочка не зеленеет, потому что сервер принимает heartbeat только по токену. ` +
+    `Скопируйте ссылку кнопкой «🔗 Ссылка плеера» вверху карточки и вставьте её в BrightAuthor ` +
+    `вместо старой <code>/player?screen=${esc(i)}</code>. После сохранения в BrightAuthor плеер ` +
+    `перезагрузит страницу сам — это займёт до минуты.`;
+  el.hidden = false;
+}
 
 function statusLine(i) {
   const el = $(`st-${i}`), s = sstat.screens[i];

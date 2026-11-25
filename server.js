@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const session = require('express-session');
-const MemoryStore = require('memorystore')(session);
+const { FileStore } = require('./session-store');
 const { processImage, openPdf, UserError, MAX_PDF_PAGES } = require('./processor');
 const video = require('./video');
 const auth = require('./auth');
@@ -15,11 +15,6 @@ const screens = require('./screens');
 const { buildMatcher } = require('./netguard');
 
 const PORT = process.env.PORT || 3000;
-// Секрет подписи cookie сессии. Сессии хранятся в памяти и пропадают при перезапуске, поэтому постоянный секрет
-// ничего не даёт: по умолчанию генерируется новый при каждом старте. Задавайте SESSION_SECRET только если
-// запускаете несколько копий сервера за балансировщиком.
-const SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
-
 // ---------- аутентификация админки ----------
 // Два источника входа:
 //   1) локальная учётка администратора — ADMIN_PASSWORD_HASH (рекомендуется) или ADMIN_PASSWORD;
@@ -71,6 +66,25 @@ const KEEP_MS = 9 * 30 * 24 * 3600 * 1000;                        // храни�
 // Все изменяемые данные (плейлисты и картинки) лежат в STORAGE_DIR — в контейнере это отдельный том /storage
 const STORAGE = process.env.STORAGE_DIR || __dirname;
 const DATA = path.join(STORAGE, 'data');
+
+// Секрет подписи cookie сессии. Задайте SESSION_SECRET для нескольких копий сервера за
+// балансировщиком; иначе он хранится в файле на томе и переживает перезапуск контейнера
+// (новый секрет при каждом старте обесценивал бы все сессии — это и выкидывало на логин).
+function loadSecret() {
+    if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
+    const f = process.env.SESSION_SECRET_FILE || path.join(DATA, '.session-secret');
+    try {
+        const v = fs.readFileSync(f, 'utf8').trim();
+        if (v) return v;
+    } catch { /* файла ещё нет — создадим ниже */ }
+    const v = crypto.randomBytes(32).toString('hex');
+    try {
+        fs.mkdirSync(path.dirname(f), { recursive: true, mode: 0o700 });
+        fs.writeFileSync(f, v, { mode: 0o600 });
+    } catch (e) { console.warn(`Не удалось сохранить SESSION_SECRET (${e.code || e.message}) — сессии не переживут рестарт`); }
+    return v;
+}
+const SECRET = loadSecret();
 const UPLOADS = path.join(STORAGE, 'uploads');
 const PUBLIC = path.join(__dirname, 'public');
 fs.mkdirSync(DATA, { recursive: true });
@@ -285,8 +299,17 @@ app.use((req, res, next) => {
     res.status(403).send('Доступ запрещён: админка доступна только из разрешённых сетей');
 });
 app.use(express.json());
+// Сессии — в файле на томе STORAGE_DIR: переживают перезапуск и пересборку контейнера.
+// Раньше был MemoryStore: любой деплой/рестарт выкидывал всех из админки на страницу входа.
+const SESSION_FILE = process.env.SESSION_FILE || path.join(DATA, 'sessions.json');
+const sessionStore = new FileStore(SESSION_FILE);
+// docker stop/перезапуск шлёт SIGTERM: успеваем записать сессии на диск, чтобы
+// никто не вылетел на страницу входа после штатного обновления контейнера.
+for (const sig of ['SIGTERM', 'SIGINT']) {
+    process.on(sig, () => { try { sessionStore.dirty = true; sessionStore.flush(); } catch {} process.exit(0); });
+}
 app.use(session({
-    store: new MemoryStore({ checkPeriod: 24 * 3600 * 1000 }),    // чистит просроченные сессии (обычный MemoryStore течёт)
+    store: sessionStore,
     secret: SECRET, resave: false, saveUninitialized: false,
     // COOKIE_SECURE=true — только если админка открыта по https (через прокси с TRUST_PROXY)
     cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.COOKIE_SECURE === 'true', maxAge: 12 * 3600 * 1000 }
@@ -590,7 +613,8 @@ app.post('/api/delete', checkAuth, (req, res) => {
 
 // ---------- состояние плееров (в памяти, плеер шлёт "пульс" каждые 10 сек и при смене слайда) ----------
 const playerState = {};
-let legacyHeartbeatWarned = false;   // однократное предупреждение о старой ссылке
+let legacyHeartbeatWarned = false;   // однократное предупреждение в лог
+const legacySeen = {};               // screen-id -> { at, ip } — плеер шлёт heartbeat старого формата
 app.post('/api/heartbeat', (req, res) => {
     const b = req.body || {};
     const s = screenByToken(b.token);
@@ -598,6 +622,13 @@ app.post('/api/heartbeat', (req, res) => {
         // Старый формат ссылки (/player?screen=<имя>) шлёт имя вместо токена.
         // Такая ссылка всегда отдаёт 400 — плеер молчит, и лампочка в админке остаётся серой.
         if (b.screen && !b.token) {
+            const name = String(b.screen).slice(0, 32);
+            const known = registry.screens.some(x => x.id === name);
+            if (known) {
+                // Помним факт: админка покажет в карточке «плеер на устаревшей ссылке».
+                const prev = legacySeen[name];
+                legacySeen[name] = { at: Date.now(), ip: req.ip, count: prev ? prev.count + 1 : 1 };
+            }
             if (!legacyHeartbeatWarned) {
                 legacyHeartbeatWarned = true;
                 console.warn(`Плеер шлёт heartbeat СТАРОГО формата (screen=${String(b.screen).slice(0, 32)}). ` +
@@ -623,7 +654,13 @@ app.post('/api/heartbeat', (req, res) => {
 });
 app.get('/api/status', checkAuth, (req, res) => {
     res.set('Cache-Control', 'no-store');
-    res.json({ serverTime: Date.now(), screens: playerState });
+    // legacy: плеер обращался со ссылкой старого формата (/player?screen=...) — лампочка не зеленеет
+    const legacy = {};
+    for (const [id, v] of Object.entries(legacySeen)) {
+        if (Date.now() - v.at < 10 * 60 * 1000) legacy[id] = { at: v.at, ip: v.ip };   // актуально 10 минут
+        else delete legacySeen[id];
+    }
+    res.json({ serverTime: Date.now(), screens: playerState, legacy });
 });
 
 // ---------- снапшоты экранов (реальный кадр с плеера через Local DWS) ----------
