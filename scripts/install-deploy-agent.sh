@@ -12,7 +12,7 @@
 set -euo pipefail
 
 PROJECT_DIR="${DEPLOY_PROJECT_DIR:-/opt/signage}"
-GIT_URL="${DEPLOY_GIT_URL:-}"              # напр. git@gitlab.example.com:group/brightsign-signage.git
+GIT_URL="${DEPLOY_GIT_URL:-}"              # напр. git@gitlab.example.com:group/signage.git
 BRANCH="${DEPLOY_BRANCH:-main}"
 PORT="${DEPLOY_AGENT_PORT:-9123}"
 ENV_DIR="/etc/signage"

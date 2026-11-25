@@ -19,22 +19,22 @@ test('loadConfig: значения по умолчанию', () => {
 });
 
 test('loadConfig: https -> порт 443, ORIGINAL=false -> не полное разрешение', () => {
-    const c = cfg({ BRIGHTSIGN_DWS_SCHEME: 'https', BRIGHTSIGN_SNAPSHOT_ORIGINAL: 'false' });
+    const c = cfg({ PLAYER_DWS_SCHEME: 'https', SNAPSHOT_ORIGINAL: 'false' });
     assert.equal(c.port, 443);
     assert.equal(c.fullResolution, false);
 });
 
 test('loadConfig: неверная схема -> ошибка', () => {
-    assert.throws(() => cfg({ BRIGHTSIGN_DWS_SCHEME: 'ftp' }), /BRIGHTSIGN_DWS_SCHEME/);
+    assert.throws(() => cfg({ PLAYER_DWS_SCHEME: 'ftp' }), /PLAYER_DWS_SCHEME/);
 });
 
 test('credentialsFor: общие логин/пароль', () => {
-    const c = cfg({ BRIGHTSIGN_DWS_USER: 'admin', BRIGHTSIGN_DWS_PASSWORD: 'pw' });
+    const c = cfg({ PLAYER_DWS_USER: 'admin', PLAYER_DWS_PASSWORD: 'pw' });
     assert.deepEqual(snap.credentialsFor(c, 'left', {}), { user: 'admin', password: 'pw' });
 });
 
 test('credentialsFor: переопределение для экрана (big_wall -> BIG_WALL)', () => {
-    const env = { BRIGHTSIGN_DWS_USER: 'admin', BRIGHTSIGN_DWS_PASSWORD: 'pw', BRIGHTSIGN_DWS_BIG_WALL_PASSWORD: 'special' };
+    const env = { PLAYER_DWS_USER: 'admin', PLAYER_DWS_PASSWORD: 'pw', PLAYER_DWS_BIG_WALL_PASSWORD: 'special' };
     const c = cfg(env);
     assert.deepEqual(snap.credentialsFor(c, 'big_wall', env), { user: 'admin', password: 'special' });
 });
@@ -59,10 +59,10 @@ test('buildAuthHeader: Basic', () => {
 });
 
 test('buildAuthHeader: Digest (RFC 2617, qop=auth) содержит обязательные поля', () => {
-    const www = 'Digest realm="BrightSign", nonce="abc123", qop="auth", opaque="zzz"';
+    const www = 'Digest realm="Device", nonce="abc123", qop="auth", opaque="zzz"';
     const h = snap.buildAuthHeader(www, { user: 'admin', password: 'pw' }, 'POST', '/api/v1/snapshot');
     assert.match(h, /^Digest /);
-    for (const k of ['username="admin"', 'realm="BrightSign"', 'nonce="abc123"', 'uri="/api/v1/snapshot"', 'qop=auth', 'nc=00000001', 'response="']) {
+    for (const k of ['username="admin"', 'realm="Device"', 'nonce="abc123"', 'uri="/api/v1/snapshot"', 'qop=auth', 'nc=00000001', 'response="']) {
         assert.ok(h.includes(k), `нет поля ${k}: ${h}`);
     }
 });
@@ -85,7 +85,7 @@ test('capture: успешный путь (POST snapshot -> GET файла), Basi
         }
         throw new Error('неожиданный URL ' + url);
     };
-    const shot = await snap.capture(cfg({ BRIGHTSIGN_DWS_PASSWORD: 'pw' }), { host: '1.2.3.4' }, { user: 'admin', password: 'pw' }, { rawRequest: raw });
+    const shot = await snap.capture(cfg({ PLAYER_DWS_PASSWORD: 'pw' }), { host: '1.2.3.4' }, { user: 'admin', password: 'pw' }, { rawRequest: raw });
     assert.equal(shot.width, 1920);
     assert.equal(shot.height, 1080);
     assert.equal(shot.filename, 'sd/remote_snapshots/img-1.jpg');
@@ -103,18 +103,18 @@ test('capture: Digest-вызов повторяется с Authorization', async
         if (url.endsWith('/api/v1/snapshot')) return jsonRes({ filename: 'sd/remote_snapshots/x.jpg' });
         return binRes(Buffer.from([1, 2, 3]));
     };
-    const shot = await snap.capture(cfg({ BRIGHTSIGN_DWS_PASSWORD: 'pw' }), { host: 'h' }, { user: 'admin', password: 'pw' }, { rawRequest: raw });
+    const shot = await snap.capture(cfg({ PLAYER_DWS_PASSWORD: 'pw' }), { host: 'h' }, { user: 'admin', password: 'pw' }, { rawRequest: raw });
     assert.equal(shot.filename, 'sd/remote_snapshots/x.jpg');
 });
 
 test('capture: HTTP-ошибка snapshot -> исключение', async () => {
     const raw = async () => ({ status: 500, headers: {}, body: Buffer.from('boom') });
-    await assert.rejects(() => snap.capture(cfg({ BRIGHTSIGN_DWS_PASSWORD: 'pw' }), { host: 'h' }, { user: 'admin', password: 'pw' }, { rawRequest: raw }), /HTTP 500/);
+    await assert.rejects(() => snap.capture(cfg({ PLAYER_DWS_PASSWORD: 'pw' }), { host: 'h' }, { user: 'admin', password: 'pw' }, { rawRequest: raw }), /HTTP 500/);
 });
 
 test('capture: нет filename в ответе -> исключение', async () => {
     const raw = async (url) => url.endsWith('/api/v1/snapshot') ? jsonRes({ ok: true }) : binRes(Buffer.from([1]));
-    await assert.rejects(() => snap.capture(cfg({ BRIGHTSIGN_DWS_PASSWORD: 'pw' }), { host: 'h' }, { user: 'admin', password: 'pw' }, { rawRequest: raw }), /нет filename/);
+    await assert.rejects(() => snap.capture(cfg({ PLAYER_DWS_PASSWORD: 'pw' }), { host: 'h' }, { user: 'admin', password: 'pw' }, { rawRequest: raw }), /нет filename/);
 });
 
 test('capture: без host -> исключение', async () => {
@@ -128,14 +128,14 @@ test('capture: https и кастомный порт попадают в URL', as
         if (url.endsWith('/api/v1/snapshot')) return jsonRes({ filename: 'sd/remote_snapshots/y.jpg' });
         return binRes(Buffer.from([9]));
     };
-    await snap.capture(cfg({ BRIGHTSIGN_DWS_SCHEME: 'https' }), { host: 'p.local', port: 8443 }, { user: 'a', password: 'b' }, { rawRequest: raw });
+    await snap.capture(cfg({ PLAYER_DWS_SCHEME: 'https' }), { host: 'p.local', port: 8443 }, { user: 'a', password: 'b' }, { rawRequest: raw });
     assert.ok(urls.every(u => u.startsWith('https://p.local:8443/')), JSON.stringify(urls));
 });
 
 // ---------- понятные сообщения об ошибках (describeError) ----------
 test('describeError: HTTP 401 -> подсказка про .env и пароль DWS', () => {
     const m = snap.describeError(new Error('DWS /snapshot: HTTP 401'), { screen: 'left' });
-    assert.match(m, /BRIGHTSIGN_DWS_PASSWORD/);
+    assert.match(m, /PLAYER_DWS_PASSWORD/);
     assert.match(m, /левый|left/);
     assert.match(m, /HTTP 401/);
 });

@@ -663,7 +663,7 @@ details.snapdet > summary { color: var(--accent); }
     <p style="font-size:13px;color:#555;margin:0 0 10px">Экран: <b id="regenName"></b></p>
     <p style="font-size:13px;color:#c0392b;margin:0 0 10px">
       Старая ссылка сразу перестанет работать. Плеер на этом экране перестанет вещать,
-      пока вы не вставите в BrightAuthor новую ссылку.
+      пока вы не вставите новую ссылку.
     </p>
     <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;margin-bottom:14px">
       <input type="checkbox" id="regenAck" style="width:auto;margin-top:2px">
@@ -756,7 +756,7 @@ function build() {
     <div class="status" id="st-${i}">…</div>
 
     <div class="box">
-      <strong>Ссылка плеера <small>вставьте в BrightAuthor как HTML5-виджет</small></strong>
+      <strong>Ссылка плеера <small>вставьте как HTML5-виджет в системе публикации</small></strong>
       <div class="snaprow">
         <input type="text" id="url-${i}" readonly value="${esc(playerUrl(i))}" aria-label="Ссылка плеера">
         <button class="btn" onclick="copyUrl('${i}')">Копировать</button>
@@ -1193,7 +1193,7 @@ function online(s) {
   return sstat.serverTime - s.lastSeen + snapAge < 35000;
 }
 
-// Плеер шлёт heartbeat старого формата (/player?screen=...) — значит, в BrightAuthor
+// Плеер шлёт heartbeat старого формата (/player?screen=...) — значит, в системе публикации
 // прописан устаревший адрес. Лампочка при этом серая, и причина неочевидна: показываем её.
 function legacyBanner(i) {
   const el = $(`legacy-${i}`);
@@ -1206,8 +1206,8 @@ function legacyBanner(i) {
     `<strong>⚠ Плеер обращается по устаревшей ссылке</strong>` +
     `Последний раз: ${mins} мин назад с ${esc(L.ip || '?')}. ` +
     `Лампочка не зеленеет, потому что сервер принимает heartbeat только по токену. ` +
-    `Скопируйте ссылку кнопкой «🔗 Ссылка плеера» вверху карточки и вставьте её в BrightAuthor ` +
-    `вместо старой <code>/player?screen=${esc(i)}</code>. После сохранения в BrightAuthor плеер ` +
+    `Скопируйте ссылку кнопкой «🔗 Ссылка плеера» вверху карточки и вставьте её ` +
+    `вместо старой <code>/player?screen=${esc(i)}</code>. После сохранения в системе публикации плеер ` +
     `перезагрузит страницу сам — это займёт до минуты.`;
   el.hidden = false;
 }
@@ -1336,7 +1336,7 @@ async function regenConfirm() {
     const el = $(`url-${i}`); if (el) el.value = playerUrl(i);
     const fr = root.querySelector(`.card[data-screen="${i}"] iframe`); if (fr) fr.src = `/player?token=${r.screen.token}&preview=1`;
     closeRegen();
-    toast('Ссылка перевыпущена. Новая ссылка (скопируйте в BrightAuthor):\n' + playerUrl(i), 'success', 9000);
+    toast('Ссылка перевыпущена. Новая ссылка (скопируйте в систему публикации):\n' + playerUrl(i), 'success', 9000);
   } finally { btn.textContent = 'Перевыпустить ссылку'; btn.disabled = false; }
 }
 

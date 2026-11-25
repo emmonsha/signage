@@ -1,6 +1,6 @@
 # Снапшоты экранов (реальный кадр с плеера)
 
-Функция делает **реальный снимок того, что в данный момент выведено на экран BrightSign**,
+Функция делает **реальный снимок того, что в данный момент выведено на экран плеера**,
 и сохраняет его. Это не реконструкция по данным сервера, а фактический кадр с устройства.
 
 - Реализация: `snapshot.js` (HTTP-клиент + Digest/Basic), API и хранение — в `server.js`.
@@ -11,7 +11,7 @@
 
 | Вопрос | Решение |
 |---|---|
-| Что такое снапшот | Реальный кадр с BrightSign через Local DWS |
+| Что такое снапшот | Реальный кадр с плеера через Local DWS |
 | Доступ | Плееры в сети; адрес — ручная карта экран → IP в админке; логин/пароль DWS — в `.env` |
 | Когда снимать | По кнопке в админке |
 | Разрешение | Оригинал плеера |
@@ -21,15 +21,15 @@
 
 ```
 Админка ──POST /api/snapshot/<screen>──► Сервер
-   Сервер ──POST http(s)://<player>/api/v1/snapshot──► BrightSign Local DWS
-   BrightSign ──► { filename, width, height, ... }
-   Сервер ──GET /api/v1/files/<filename>?contents&stream──► BrightSign
-   BrightSign ──► JPEG/PNG ──► Сервер сохраняет в /storage/snapshots/<screen>/
+   Сервер ──POST http(s)://<player>/api/v1/snapshot──► Local DWS
+   Плеер ──► { filename, width, height, ... }
+   Сервер ──GET /api/v1/files/<filename>?contents&stream──► Плеер
+   Плеер ──► JPEG/PNG ──► Сервер сохраняет в /storage/snapshots/<screen>/
 ```
 
 Сервер сам ходит к плееру (исходящие HTTP-запросы), поэтому сервер и плееры должны быть
 в одной доступной сети. Авторизация Local DWS — **Digest** (fallback Basic), как это делает
-сам BrightSign.
+сам плеер.
 
 ## Настройка
 
@@ -41,19 +41,19 @@
 ### 2. Логин/пароль DWS — в `.env`
 
 ```dotenv
-BRIGHTSIGN_DWS_USER=admin
-BRIGHTSIGN_DWS_PASSWORD=<пароль Local DWS>
-BRIGHTSIGN_DWS_SCHEME=http      # http | https
-BRIGHTSIGN_DWS_PORT=80          # 443 для https
-BRIGHTSIGN_SNAPSHOT_ORIGINAL=true
+PLAYER_DWS_USER=admin
+PLAYER_DWS_PASSWORD=<пароль Local DWS>
+PLAYER_DWS_SCHEME=http      # http | https
+PLAYER_DWS_PORT=80          # 443 для https
+SNAPSHOT_ORIGINAL=true
 SNAPSHOT_KEEP=20                # сколько последних кадров хранить на экран
 SNAPSHOT_TIMEOUT_MS=15000
 ```
 
-Для конкретного экрана можно переопределить: `BRIGHTSIGN_DWS_BIG_WALL_USER` /
-`BRIGHTSIGN_DWS_BIG_WALL_PASSWORD` (имя экрана в верхнем регистре, не-буквы → `_`).
+Для конкретного экрана можно переопределить: `PLAYER_DWS_BIG_WALL_USER` /
+`PLAYER_DWS_BIG_WALL_PASSWORD` (имя экрана в верхнем регистре, не-буквы → `_`).
 Любая переменная поддерживает суффикс `_FILE` (Docker secrets):
-`BRIGHTSIGN_DWS_PASSWORD_FILE=/run/secrets/dws_password`.
+`PLAYER_DWS_PASSWORD_FILE=/run/secrets/dws_password`.
 
 Проверка, что DWS плеера отвечает (curl с Digest):
 
@@ -98,8 +98,8 @@ curl -s -b cookies localhost:3000/api/snapshot/left
 админки пароль не вводится):
 
 ```dotenv
-BRIGHTSIGN_DWS_USER=admin
-BRIGHTSIGN_DWS_PASSWORD=<пароль локальной учётки плеера>
+PLAYER_DWS_USER=admin
+PLAYER_DWS_PASSWORD=<пароль локальной учётки плеера>
 ```
 
 После правки — пересоздать контейнер, чтобы переменные подхватились:
@@ -109,7 +109,7 @@ docker compose up -d --force-recreate
 ```
 
 Пароль локальной учётки плеера — **не** учётка FreeIPA/админки панели.
-Для отдельного экрана можно задать свой: `BRIGHTSIGN_DWS_BIG_WALL_PASSWORD=…`.
+Для отдельного экрана можно задать свой: `PLAYER_DWS_BIG_WALL_PASSWORD=…`.
 Пустой пароль допустим, если DWS без аутентификации.
 
 ## Диагностика
@@ -117,7 +117,7 @@ docker compose up -d --force-recreate
 С 2026-11-25 сервер отвечает **подсказкой с действием**, а не сухим кодом; исходный текст
 ошибки сохраняется в квадратных скобках в конце.
 
-- **HTTP 401** — «проверьте `BRIGHTSIGN_DWS_USER`/`BRIGHTSIGN_DWS_PASSWORD` в `.env` … пароль
+- **HTTP 401** — «проверьте `PLAYER_DWS_USER`/`PLAYER_DWS_PASSWORD` в `.env` … пароль
   от локальной учётки самого плеера, не от FreeIPA».
 - **HTTP 403** — «выключен Local DWS или закрыт удалённый доступ».
 - **HTTP 404 при скачивании** — «путь `remote_snapshots` на этой модели другой; проверьте поле
@@ -137,7 +137,7 @@ docker compose up -d --force-recreate
 
 Проверка: в логе сервера при устаревшей ссылке появляется однократное предупреждение
 «Плеер шлёт heartbeat СТАРОГО формата …». Откройте страницу плеера в обычной вкладке браузера —
-там должно быть `?token=…`, а не `?screen=…`. Обновите адрес HTML5-виджета в BrightAuthor.
+там должно быть `?token=…`, а не `?screen=…`. Обновите адрес HTML5-виджета в системе публикации.
 
 Поле «IP плеера» к лампочке отношения не имеет — это отдельная карта для снапшотов через DWS.
 
@@ -179,7 +179,7 @@ docker compose up -d --force-recreate
 
 > ⚠ Плеер обращается по устаревшей ссылке. Последний раз: N мин назад с <IP>. Лампочка не
 > зеленеет, потому что сервер принимает heartbeat только по токену. Скопируйте ссылку кнопкой
-> «🔗 Ссылка плеера» и вставьте её в BrightAuthor вместо старой `/player?screen=…`.
+> «🔗 Ссылка плеера» и вставьте её в системе публикации вместо старой `/player?screen=…`.
 
 Баннер исчезает сам, как только плеер пришлёт heartbeat по токену. Флаг `legacy` в
 `/api/status` актуален 10 минут.

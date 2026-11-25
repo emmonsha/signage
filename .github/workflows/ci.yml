@@ -29,4 +29,4 @@ jobs:
       - name: Tests
         run: npm test
       - name: Docker build
-        run: docker build -t brightsign-signage:ci .
+        run: docker build -t signage:ci .

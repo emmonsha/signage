@@ -1,4 +1,4 @@
-# Управление экранами BrightSign
+# Управление экранами
 
 Админка + страницы-плееры (`left`, `right`, `big_wall`). Картинки, PDF и видео приводятся к 1920×1080 автоматически.
 
@@ -15,8 +15,8 @@
 
 ```bash
 # с сервера — одной строкой (подставьте свой репозиторий):
-SIGNAGE_REPO=https://github.com/USER/brightsign-signage.git \
-  curl -fsSL https://raw.githubusercontent.com/USER/brightsign-signage/main/install.sh | bash
+SIGNAGE_REPO=https://github.com/USER/signage.git \
+  curl -fsSL https://raw.githubusercontent.com/USER/signage/main/install.sh | bash
 
 # либо из папки проекта (в том числе распакованного из ZIP):
 ./install.sh
@@ -26,7 +26,7 @@ SIGNAGE_REPO=https://github.com/USER/brightsign-signage.git \
 
 | Переменная | Назначение | По умолчанию |
 |---|---|---|
-| `SIGNAGE_DIR` | каталог установки | `~/brightsign-signage` |
+| `SIGNAGE_DIR` | каталог установки | `~/signage` |
 | `SIGNAGE_REPO` | git-URL репозитория | — (в режиме curl обязателен) |
 | `SIGNAGE_BRANCH` | ветка | `main` |
 | `SIGNAGE_PORT` | порт админки на хосте | `3000` |
@@ -65,7 +65,7 @@ docker compose ps          # статус должен стать healthy
 
 Админка: `http://IP_СЕРВЕРА:3000/admin`
 
-Адреса для HTML5-виджетов в BrightAuthor: их выдаёт админка — в карточке каждого экрана есть поле
+Адреса для HTML5-виджетов в системе публикации: их выдаёт админка — в карточке каждого экрана есть поле
 «🔗 Ссылка плеера» с кнопкой **Копировать**. Ссылка содержит секретный токен экрана и выглядит так:
 
 - `http://IP_СЕРВЕРА:3000/player?token=<токен экрана>`
@@ -97,7 +97,7 @@ docker compose ps          # статус должен стать healthy
 - Конвертация нагружает процессор (ffmpeg запускается с пониженным приоритетом, но на слабом сервере поставьте `VIDEO_THREADS=2` и `VIDEO_PRESET=veryfast`). Минута 1080p занимает от десятков секунд до нескольких минут в зависимости от процессора.
 - Контейнеру дано 2 ГБ памяти. Место на диске: размер файла после конвертации (обычно 5–15 МБ на минуту), оригинал удаляется.
 - Через обратный прокси проверьте лимиты тела запроса: для nginx `client_max_body_size 2g; proxy_request_buffering off;` и увеличенные `proxy_read_timeout`/`proxy_send_timeout`. Сам сервер ждёт загрузку до 30 минут.
-- **Проверьте воспроизведение на вашей модели BrightSign до боевого запуска**: потолок H.264 (профиль, уровень, 1080p60) зависит от модели плеера, а правила автозапуска и звука в HTML-виджете могут отличаться от браузера. Для более слабых моделей поставьте `VIDEO_MAX_FPS=30`. Сначала загрузите короткий тестовый ролик со звуком и без.
+- **Проверьте воспроизведение на вашей модели плеера до боевого запуска**: потолок H.264 (профиль, уровень, 1080p60) зависит от модели плеера, а правила автозапуска и звука в HTML-виджете могут отличаться от браузера. Для более слабых моделей поставьте `VIDEO_MAX_FPS=30`. Сначала загрузите короткий тестовый ролик со звуком и без.
 - Без Docker нужен ffmpeg в системе (`apt install ffmpeg` / `brew install ffmpeg`); без него картинки работают, а видео отклоняется с понятным сообщением. Пути можно задать через `FFMPEG_PATH` и `FFPROBE_PATH`.
 
 ## Вход через FreeIPA (LDAP)
@@ -139,17 +139,17 @@ FREEIPA_USER_FILTER=(uid={username})
 Адрес плеера задаётся в админке (поле «IP плеера»), логин/пароль DWS — в `.env`:
 
 ```dotenv
-BRIGHTSIGN_DWS_USER=admin
-BRIGHTSIGN_DWS_PASSWORD=<пароль Local DWS>
-BRIGHTSIGN_DWS_SCHEME=http          # http | https
-BRIGHTSIGN_DWS_PORT=80              # 443 для https
-BRIGHTSIGN_SNAPSHOT_ORIGINAL=true   # кадр в оригинальном разрешении
+PLAYER_DWS_USER=admin
+PLAYER_DWS_PASSWORD=<пароль Local DWS>
+PLAYER_DWS_SCHEME=http          # http | https
+PLAYER_DWS_PORT=80              # 443 для https
+SNAPSHOT_ORIGINAL=true   # кадр в оригинальном разрешении
 SNAPSHOT_KEEP=20                    # сколько последних кадров хранить на экран
 ```
 
 Сервер сам ходит к плееру (нужен сетевой доступ сервер → плеер и включённый Local DWS).
 Авторизация DWS — Digest (fallback Basic). Для конкретного экрана можно переопределить
-логин/пароль: `BRIGHTSIGN_DWS_BIG_WALL_PASSWORD=…`. Подробнее — `docs/04_SNAPSHOTS.md`.
+логин/пароль: `PLAYER_DWS_BIG_WALL_PASSWORD=…`. Подробнее — `docs/04_SNAPSHOTS.md`.
 
 ## Автодеплой «одной кнопкой»
 
@@ -233,7 +233,7 @@ docker compose up -d --build        # пересборка + перезапус�
 
 ## Данные и бэкапы
 
-Всё изменяемое хранится в томе `brightsign-signage_storage` (`/storage`: `data/` — плейлисты, `screens.json` — экраны и их токены, `players.json` — адреса плееров для снапшотов, `sessions.json` — сессии админки, `uploads/` — картинки и видео).
+Всё изменяемое хранится в томе `signage_storage` (`/storage`: `data/` — плейлисты, `screens.json` — экраны и их токены, `players.json` — адреса плееров для снапшотов, `sessions.json` — сессии админки, `uploads/` — картинки и видео).
 
 ```bash
 scripts/backup.sh                      # -> backups/signage-ДАТА.tar.gz (хранится 14 последних)
@@ -248,7 +248,7 @@ scripts/restore.sh backups/signage-….tar.gz
 
 ```bash
 docker compose up -d --build && docker compose stop signage
-docker run --rm -v brightsign-signage_storage:/storage -v "$PWD/старая-папка":/src busybox:stable \
+docker run --rm -v signage_storage:/storage -v "$PWD/старая-папка":/src busybox:stable \
   sh -c 'cp -r /src/data /src/uploads /storage/ && rm -rf /storage/data/tmp && chown -R 1000:1000 /storage'
 docker compose start signage
 ```
@@ -262,9 +262,9 @@ docker compose start signage
 | `AUTH_MODE` | источник входа: `local` / `freeipa` / `both` | по FreeIPA, иначе local |
 | `ADMIN_USER` | логин локального администратора (режимы local/both) | admin |
 | `FREEIPA_*` | вход через FreeIPA (LDAP) — см. раздел «Вход через FreeIPA» | выкл. |
-| `BRIGHTSIGN_DWS_USER`, `BRIGHTSIGN_DWS_PASSWORD` | логин/пароль Local DWS плеера для снапшотов | admin, пусто |
-| `BRIGHTSIGN_DWS_SCHEME`, `BRIGHTSIGN_DWS_PORT` | схема/порт DWS | http, 80 |
-| `BRIGHTSIGN_SNAPSHOT_ORIGINAL` | снимать кадр в оригинальном разрешении | true |
+| `PLAYER_DWS_USER`, `PLAYER_DWS_PASSWORD` | логин/пароль Local DWS плеера для снапшотов | admin, пусто |
+| `PLAYER_DWS_SCHEME`, `PLAYER_DWS_PORT` | схема/порт DWS | http, 80 |
+| `SNAPSHOT_ORIGINAL` | снимать кадр в оригинальном разрешении | true |
 | `SNAPSHOT_KEEP` | сколько последних кадров хранить на экран | 20 |
 | `DEPLOY_ENABLED` | кнопка «Обновить систему» (автодеплой) | false |
 | `DEPLOY_AGENT_URL`, `DEPLOY_AGENT_TOKEN` | адрес и токен мини-агента деплоя | 127.0.0.1:9123, — |
@@ -281,7 +281,7 @@ docker compose start signage
 
 ## HTTPS через обратный прокси
 
-Плееры BrightSign спокойно работают по http в локальной сети. Если админку нужно открыть по https (например, через Caddy/nginx/Traefik), проксируйте на `127.0.0.1:3000`, передавайте заголовки `X-Forwarded-For` и `X-Forwarded-Proto`, и задайте в `.env`: `TRUST_PROXY=1`, `COOKIE_SECURE=true`. Тогда вход по голому `http://IP:3000` перестанет работать — для плееров оставьте http-адрес в локальной сети или отдельное правило в прокси. Пример для Caddy:
+Плееры спокойно работают по http в локальной сети. Если админку нужно открыть по https (например, через Caddy/nginx/Traefik), проксируйте на `127.0.0.1:3000`, передавайте заголовки `X-Forwarded-For` и `X-Forwarded-Proto`, и задайте в `.env`: `TRUST_PROXY=1`, `COOKIE_SECURE=true`. Тогда вход по голому `http://IP:3000` перестанет работать — для плееров оставьте http-адрес в локальной сети или отдельное правило в прокси. Пример для Caddy:
 
 ```
 signage.example.com {
@@ -301,7 +301,7 @@ signage.example.com {
 - Изменения в коде или интерфейсе не видны: сделан `docker compose restart` вместо
   `docker compose up -d --build` (файлы копируются в образ при сборке).
 - Снапшот не снимается: сообщение об ошибке в админке подсказывает причину. Пароль
-  Local DWS задаётся в `.env` (`BRIGHTSIGN_DWS_USER`/`BRIGHTSIGN_DWS_PASSWORD`), а не в
+  Local DWS задаётся в `.env` (`PLAYER_DWS_USER`/`PLAYER_DWS_PASSWORD`), а не в
   админке — сервер ходит к плееру сам.
 - Лампочка связи серая, а плеер работает: он открыт по старой ссылке
   `/player?screen=<имя>`. Нужна ссылка с токеном — `/player?token=<токен>` из карточки

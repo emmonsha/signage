@@ -54,7 +54,7 @@ docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d --build
 # 1. Deploy key: создать на сервере ключ и добавить его в GitLab (Settings → Repository → Deploy keys, read-only)
 sudo -u signage ssh-keygen -t ed25519 -N '' -f /opt/signage/.ssh/id_ed25519   # или для существующего пользователя
 # 2. Установить агента (склонирует проект, создаст токен, поставит systemd-сервис)
-sudo DEPLOY_GIT_URL=git@gitlab.example.com:group/brightsign-signage.git \
+sudo DEPLOY_GIT_URL=git@gitlab.example.com:group/signage.git \
      DEPLOY_BRANCH=main bash scripts/install-deploy-agent.sh
 # 3. Прописать токен и включить деплой в .env контейнера (токен — из /etc/signage/deploy-agent.env)
 #    DEPLOY_ENABLED=true

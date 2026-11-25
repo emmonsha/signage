@@ -2,7 +2,7 @@
 # Архив плейлистов и картинок из тома в ./backups (хранится 14 последних)
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VOL="${VOLUME_NAME:-brightsign-signage_storage}"
+VOL="${VOLUME_NAME:-signage_storage}"
 mkdir -p backups
 FILE="signage-$(date +%Y%m%d-%H%M%S).tar.gz"
 docker run --rm --user "$(id -u):$(id -g)" \

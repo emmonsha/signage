@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 FILE="${1:?Укажите архив: scripts/restore.sh backups/signage-XXXX.tar.gz}"
-VOL="${VOLUME_NAME:-brightsign-signage_storage}"
+VOL="${VOLUME_NAME:-signage_storage}"
 read -r -p "Текущие данные будут заменены данными из $FILE. Продолжить? [y/N] " a
 [[ "$a" == "y" ]] || exit 1
 docker compose stop signage

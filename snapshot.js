@@ -1,4 +1,4 @@
-// Снапшот экрана: реальный кадр с плеера BrightSign через Local DWS (Diagnostic Web Server).
+// Снапшот экрана: реальный кадр с плеера через Local DWS (Diagnostic Web Server).
 // Схема: POST /api/v1/snapshot -> ответ JSON с filename -> GET /api/v1/files/<filename>?contents&stream
 // (см. docs/04_SNAPSHOTS.md). Авторизация DWS — Digest (fallback Basic).
 //
@@ -29,23 +29,23 @@ const screenVar = s => String(s).toUpperCase().replace(/[^A-Z0-9]/g, '_');
 
 // Конфигурация снапшотов из окружения.
 function loadConfig(env = process.env) {
-    const scheme = String(env.BRIGHTSIGN_DWS_SCHEME || 'http').trim().toLowerCase();
-    if (!['http', 'https'].includes(scheme)) throw new Error('BRIGHTSIGN_DWS_SCHEME: допустимы http или https');
+    const scheme = String(env.PLAYER_DWS_SCHEME || 'http').trim().toLowerCase();
+    if (!['http', 'https'].includes(scheme)) throw new Error('PLAYER_DWS_SCHEME: допустимы http или https');
     return {
         scheme,
-        port: int(env.BRIGHTSIGN_DWS_PORT, scheme === 'https' ? 443 : 80),
-        user: envOrFile(env, 'BRIGHTSIGN_DWS_USER', true) || 'admin',
-        password: envOrFile(env, 'BRIGHTSIGN_DWS_PASSWORD') || '',
-        fullResolution: env.BRIGHTSIGN_SNAPSHOT_ORIGINAL === undefined ? true : bool(env.BRIGHTSIGN_SNAPSHOT_ORIGINAL),
+        port: int(env.PLAYER_DWS_PORT, scheme === 'https' ? 443 : 80),
+        user: envOrFile(env, 'PLAYER_DWS_USER', true) || 'admin',
+        password: envOrFile(env, 'PLAYER_DWS_PASSWORD') || '',
+        fullResolution: env.SNAPSHOT_ORIGINAL === undefined ? true : bool(env.SNAPSHOT_ORIGINAL),
         keep: int(env.SNAPSHOT_KEEP, 20),
         timeout: int(env.SNAPSHOT_TIMEOUT_MS, 15000)
     };
 }
 
-// Логин/пароль DWS для конкретного экрана: BRIGHTSIGN_DWS_<SCREEN>_USER/_PASSWORD,
-// иначе — общие BRIGHTSIGN_DWS_USER/_PASSWORD. Пустой пароль допустим (DWS без аутентификации).
+// Логин/пароль DWS для конкретного экрана: PLAYER_DWS_<SCREEN>_USER/_PASSWORD,
+// иначе — общие PLAYER_DWS_USER/_PASSWORD. Пустой пароль допустим (DWS без аутентификации).
 function credentialsFor(cfg, screen, env = process.env) {
-    const p = 'BRIGHTSIGN_DWS_' + screenVar(screen) + '_';
+    const p = 'PLAYER_DWS_' + screenVar(screen) + '_';
     const user = envOrFile(env, p + 'USER', true);
     const pass = envOrFile(env, p + 'PASSWORD');
     return {
@@ -170,10 +170,10 @@ function describeError(e, ctx = {}) {
     const http = msg.match(/HTTP (\d{3})/);
     if (http) {
         const s = Number(http[1]);
-        if (s === 401) return hint('Local DWS требует авторизации, но пароль не подошёл. Проверьте BRIGHTSIGN_DWS_USER/BRIGHTSIGN_DWS_PASSWORD в .env — пароль должен быть от локальной учётки самого плеера (не от FreeIPA). Если пароль задан отдельно для этого экрана — BRIGHTSIGN_DWS_<ИМЯ>_PASSWORD. После правки: docker compose up -d --force-recreate.') + ` [${msg}]`;
+        if (s === 401) return hint('Local DWS требует авторизации, но пароль не подошёл. Проверьте PLAYER_DWS_USER/PLAYER_DWS_PASSWORD в .env — пароль должен быть от локальной учётки самого плеера (не от FreeIPA). Если пароль задан отдельно для этого экрана — PLAYER_DWS_<ИМЯ>_PASSWORD. После правки: docker compose up -d --force-recreate.') + ` [${msg}]`;
         if (s === 403) return hint('Плеер отклонил запрос: выключен Local DWS или закрыт удалённый доступ. Включите Local DWS в настройках плеера и разрешите удалённый доступ.') + ` [${msg}]`;
         if (s === 404 && /файл|files|снапшот/i.test(msg)) return hint('Файл снапшота не найден: путь remote_snapshots на этой модели другой. Проверьте вручную поле filename из POST /api/v1/snapshot через curl.') + ` [${msg}]`;
-        if (s === 404) return hint('Плеер не знает такой адрес API: проверьте модель/прошивку (нужен BrightSign Local DWS).') + ` [${msg}]`;
+        if (s === 404) return hint('Плеер не знает такой адрес API: проверьте модель/прошивку (нужен Local DWS).') + ` [${msg}]`;
         if (s === 429) return hint('Плеер ограничил частоту запросов: подождите и попробуйте снова.') + ` [${msg}]`;
         return hint(`Плеер ответил HTTP ${s}.`) + ` [${msg}]`;
     }

@@ -1,6 +1,6 @@
 [Unit]
-Description=BrightSign signage deploy agent
-Documentation=https://github.com/emmonsha/brightsign-signage
+Description=Signage deploy agent
+Documentation=https://github.com/emmonsha/signage
 After=network-online.target docker.service
 Wants=network-online.target
 

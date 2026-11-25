@@ -1,10 +1,10 @@
-name: brightsign-signage
+name: signage
 
 services:
   signage:
     build: .
-    image: brightsign-signage:latest
-    container_name: brightsign-signage
+    image: signage:latest
+    container_name: signage
     restart: unless-stopped
     init: true                                   # корректные сигналы и зомби-процессы
     ports:
@@ -37,11 +37,11 @@ services:
       VIDEO_PRESET: ${VIDEO_PRESET:-medium}           # скорость/качество x264: veryfast … slow
       TRUST_PROXY: ${TRUST_PROXY:-}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
-      BRIGHTSIGN_DWS_USER: ${BRIGHTSIGN_DWS_USER:-admin}     # логин Local DWS плеера
-      BRIGHTSIGN_DWS_PASSWORD: ${BRIGHTSIGN_DWS_PASSWORD:-} # пароль Local DWS плеера
-      BRIGHTSIGN_DWS_SCHEME: ${BRIGHTSIGN_DWS_SCHEME:-http}
-      BRIGHTSIGN_DWS_PORT: ${BRIGHTSIGN_DWS_PORT:-80}
-      BRIGHTSIGN_SNAPSHOT_ORIGINAL: ${BRIGHTSIGN_SNAPSHOT_ORIGINAL:-true}
+      PLAYER_DWS_USER: ${PLAYER_DWS_USER:-admin}     # логин Local DWS плеера
+      PLAYER_DWS_PASSWORD: ${PLAYER_DWS_PASSWORD:-} # пароль Local DWS плеера
+      PLAYER_DWS_SCHEME: ${PLAYER_DWS_SCHEME:-http}
+      PLAYER_DWS_PORT: ${PLAYER_DWS_PORT:-80}
+      SNAPSHOT_ORIGINAL: ${SNAPSHOT_ORIGINAL:-true}
       SNAPSHOT_KEEP: ${SNAPSHOT_KEEP:-20}
       SNAPSHOT_TIMEOUT_MS: ${SNAPSHOT_TIMEOUT_MS:-15000}
       DEPLOY_ENABLED: ${DEPLOY_ENABLED:-false}

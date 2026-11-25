@@ -77,7 +77,7 @@ async function showImage(url) {
 }
 function showBlack() { imgs.forEach(i => i.classList.remove('active')); shownUrl = null; hideVideo(); }
 
-// ---- видео: один <video> на все ролики (на BrightSign аппаратный декодер один) ----
+// ---- видео: один <video> на все ролики (у плеера один аппаратный декодер) ----
 let vidToken = 0;
 function hideVideo() {
   const t = ++vidToken;

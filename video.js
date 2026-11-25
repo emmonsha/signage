@@ -1,4 +1,4 @@
-// Видео для BrightSign: проверка (ffprobe) и конвертация (ffmpeg) в MP4 — H.264 High@4.2, yuv420p, 1920x1080, AAC.
+// Видео для плеера: проверка (ffprobe) и конвертация (ffmpeg) в MP4 — H.264 High@4.2, yuv420p, 1920x1080, AAC.
 const { execFile, spawn } = require('child_process');
 const os = require('os');
 const { UserError } = require('./processor');

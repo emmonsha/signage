@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-#  Установщик / настройщик brightsign-signage
+#  Установщик / настройщик signage
 # ============================================================================
 #  Один скрипт для двух случаев:
 #    1) установка с нуля  — клонирует репозиторий, создаёт .env, задаёт пароль,
@@ -13,11 +13,11 @@
 #    ./install.sh
 #
 #    # одной строкой с сервера (без клонирования руками):
-#    SIGNAGE_REPO=https://github.com/USER/brightsign-signage.git \
-#      curl -fsSL https://raw.githubusercontent.com/USER/brightsign-signage/main/install.sh | bash
+#    SIGNAGE_REPO=https://github.com/USER/signage.git \
+#      curl -fsSL https://raw.githubusercontent.com/USER/signage/main/install.sh | bash
 #
 #  Полезные переменные окружения:
-#    SIGNAGE_DIR=/opt/signage        каталог установки (по умолчанию ~/brightsign-signage)
+#    SIGNAGE_DIR=/opt/signage        каталог установки (по умолчанию ~/signage)
 #    SIGNAGE_REPO=<git-url>          репозиторий (нужен в режиме curl; иначе берётся origin)
 #    SIGNAGE_BRANCH=main             ветка
 #    SIGNAGE_PORT=3000               порт админки на хосте
@@ -54,7 +54,7 @@ if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/docker-compose.yml" ]]; then
 fi
 
 # --- параметры ---------------------------------------------------------------
-DEFAULT_DIR="${SIGNAGE_DIR:-$HOME/brightsign-signage}"
+DEFAULT_DIR="${SIGNAGE_DIR:-$HOME/signage}"
 BRANCH="${SIGNAGE_BRANCH:-main}"
 PORT="${SIGNAGE_PORT:-}"
 REPO="${SIGNAGE_REPO:-}"
@@ -181,7 +181,7 @@ if [[ -n "$PORT" ]]; then set_env PORT "$PORT"; fi
 for k in FREEIPA_ENABLED FREEIPA_URL FREEIPA_BASE_DN FREEIPA_USER_BASE_DN \
          FREEIPA_BIND_DN FREEIPA_BIND_PASSWORD FREEIPA_REQUIRE_GROUP \
          DEPLOY_ENABLED DEPLOY_AGENT_URL DEPLOY_AGENT_TOKEN \
-         SCREENS BRIGHTSIGN_DWS_USER BRIGHTSIGN_DWS_PASSWORD; do
+         SCREENS PLAYER_DWS_USER PLAYER_DWS_PASSWORD; do
     if [[ -n "${!k:-}" ]]; then set_env "$k" "${!k}"; fi
 done
 

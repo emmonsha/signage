@@ -107,7 +107,7 @@ function reloadRegistry() {
     SCREENS = registry.screens.map(s => s.id);
 }
 
-// ---------- снапшоты экранов (реальный кадр с плеера BrightSign) ----------
+// ---------- снапшоты экранов (реальный кадр с плеера) ----------
 // Адреса плееров (экран -> host/port/scheme) лежат рядом с данными: data/players.json
 // Кадры хранятся в STORAGE/snapshots/<screen>/, хранится последние SNAPSHOT_KEEP штук.
 let SNAP;
@@ -289,7 +289,7 @@ app.get('/healthz', (req, res) => {
     catch { res.status(503).json({ ok: false }); }
 });
 
-// Ограничение по сетям (ADMIN_ALLOWED_NETS): открыто только то, что нужно плеерам BrightSign.
+// Ограничение по сетям (ADMIN_ALLOWED_NETS): открыто только то, что нужно плеерам.
 // Всё остальное (админка, загрузка, удаление, статус) — только из разрешённых сетей.
 const PLAYER_PATHS = [/^\/player\/?$/, /^\/api\/playlist\/[^/]+$/, /^\/uploads\//, /^\/api\/heartbeat$/, /^\/healthz$/];
 const blockedSeen = new Set();
@@ -406,7 +406,7 @@ app.get('/api/auth', (req, res) => res.json({ mode: AUTH_MODE, username: IPA_LOG
 app.get('/admin', (req, res) =>
     res.sendFile(path.join(PUBLIC, req.session.authorized ? 'admin.html' : 'login.html')));
 
-// Страница-плеер для BrightSign: http://IP:3000/player?token=<токен экрана>
+// Страница-плеер для медиаплееров: http://IP:3000/player?token=<токен экрана>
 app.get('/player', (req, res) => res.sendFile(path.join(PUBLIC, 'player.html')));
 
 // Список экранов с именами и токенами ссылок (только для админки).
@@ -632,7 +632,7 @@ app.post('/api/heartbeat', (req, res) => {
             if (!legacyHeartbeatWarned) {
                 legacyHeartbeatWarned = true;
                 console.warn(`Плеер шлёт heartbeat СТАРОГО формата (screen=${String(b.screen).slice(0, 32)}). ` +
-                    'Ссылка перевыпущена на формат /player?token=<...>: обновите адрес в BrightAuthor (поле «Ссылка плеера» в админке).');
+                    'Ссылка перевыпущена на формат /player?token=<...>: обновите адрес в системе публикации (поле «Ссылка плеера» в админке).');
             }
             return res.status(400).json({ ok: false, hint: 'Устаревшая ссылка: откройте /player?token=<токен> из админки' });
         }
