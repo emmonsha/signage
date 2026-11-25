@@ -71,6 +71,10 @@
   .snaphist .it { position:relative; width:72px; }
   .snaphist img { width:72px; height:40px; object-fit:cover; border-radius:3px; border:1px solid #ddd; display:block; cursor:pointer; }
   .snaphist .it button { position:absolute; top:-6px; right:-6px; border:none; background:#c0392b; color:#fff; border-radius:50%; width:16px; height:16px; font-size:10px; line-height:16px; padding:0; cursor:pointer; }
+  details.snapdet { margin-top:6px; }
+  details.snapdet > summary { cursor:pointer; color:#007bff; }
+  details.snapdet[open] > summary { margin-bottom:6px; }
+  details.snapdet .snaphist { max-height:180px; overflow:auto; }
 </style>
 </head>
 <body>
@@ -167,12 +171,15 @@ function build() {
       </div>
       <div class="snaprow">
         <button class="btn" onclick="snapNow('${i}')">Снять снапшот</button>
-        <button class="btn" onclick="loadSnaps('${i}')">Обновить</button>
         <span id="snapmsg-${i}" class="snapinfo"></span>
       </div>
-      <div class="snapimg" id="snapimg-${i}">нет снимка</div>
-      <div class="snapinfo" id="snapmeta-${i}"></div>
-      <div class="snaphist" id="snaphist-${i}"></div>
+      <details class="sec snapdet" id="snapdet-${i}">
+        <summary id="snapsum-${i}">Показать снапшот</summary>
+        <div class="snapimg" id="snapimg-${i}">нет снимка</div>
+        <div class="snapinfo" id="snapmeta-${i}"></div>
+        <div class="snapinfo">Ранее сохранённые кадры:</div>
+        <div class="snaphist" id="snaphist-${i}"></div>
+      </details>
     </div>
 
     <div id="jobs-${i}" hidden></div>
@@ -581,6 +588,7 @@ async function snapNow(i) {
     if (!r.success) { snapMsg(i, r.message || 'Ошибка', '#c0392b'); return; }
     snapMsg(i, `Готово: ${r.width || '?'}×${r.height || '?'}`, '#28a745');
     await loadSnaps(i);
+    const det = $(`snapdet-${i}`); if (det) det.open = true;   // показать свежий кадр
   } catch { snapMsg(i, 'Сервер недоступен', '#c0392b'); }
 }
 
@@ -588,11 +596,17 @@ async function loadSnaps(i) {
   let d;
   try { d = await api(`/api/snapshot/${i}`); } catch { return; }
   const files = (d && d.files) || [];
-  const img = $(`snapimg-${i}`), meta = $(`snapmeta-${i}`), hist = $(`snaphist-${i}`);
+  const img = $(`snapimg-${i}`), meta = $(`snapmeta-${i}`), hist = $(`snaphist-${i}`), sum = $(`snapsum-${i}`);
   if (d.player && !$(`addr-${i}`).value) $(`addr-${i}`).value = (d.player.scheme ? d.player.scheme + '://' : '') + d.player.host + (d.player.port ? ':' + d.player.port : '');
-  if (!files.length) { img.textContent = 'нет снимка'; meta.textContent = ''; hist.innerHTML = ''; return; }
+  if (!files.length) {
+    if (sum) sum.textContent = 'Снапшотов пока нет';
+    img.textContent = 'нет снимка'; meta.textContent = ''; hist.innerHTML = ''; return;
+  }
+  const when = files[0].replace(/T/, ' ').replace(/\.(jpe?g|png)$/i, '');
+  if (sum) sum.textContent = `Показать снапшот — последний: ${when}`;
   img.innerHTML = `<img src="/api/snapshot/${i}/file/${files[0]}?t=${Date.now()}" alt="снапшот">`;
-  meta.textContent = `Последний кадр: ${files[0].replace(/T/, ' ').replace(/\.(jpe?g|png)$/i, '')} · всего ${files.length} (хранится ${d.keep})`;
+  meta.innerHTML = `Последний кадр: ${when} · всего ${files.length} (хранится ${d.keep}) · ` +
+    `<a href="/api/snapshot/${i}/latest" target="_blank" rel="noopener">открыть оригинал</a>`;
   hist.innerHTML = files.slice(0, 12).map(f =>
     `<div class="it"><img src="/api/snapshot/${i}/file/${f}?t=${Date.now()}" title="${esc(f)}" onclick="window.open(this.src)"><button title="Удалить" onclick="delSnap('${i}','${f}')">×</button></div>`).join('');
 }
