@@ -77,26 +77,564 @@
   details.snapdet > summary { cursor:pointer; color:#007bff; }
   details.snapdet[open] > summary { margin-bottom:6px; }
   details.snapdet .snaphist { max-height:180px; overflow:auto; }
+  /* точки состояний слайдов (вместо окрашенного текста) */
+  .rel-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:1px; }
+  .dot-wait { background: var(--warning, #f0ad4e); }
+  .dot-end  { background: var(--text-disabled, #adb5bd); }
+
+
+/* ===== design tokens (Фаза A) ===== */
+/* ============================================================
+   signage admin — дизайн-токены v1 (Фаза A)
+   Самодостаточные HTML-файлы: блок копируется ВНУТРЬ <style> каждого файла
+   (login.html, admin.html). player.html токенов не требует.
+   Светлая тема — базовая и обязательная.
+   Тёмная — опционально (фаза C), включается атрибутом <html data-theme="dark">.
+   Все цвета проверены на контраст WCAG AA (расчёты в audit.md).
+   ============================================================ */
+:root {
+  /* Шрифт: только системный стек, без внешних ресурсов */
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Типографическая шкала */
+  --fs-xs: 12px;
+  --fs-s: 13px;
+  --fs-m: 14px;   /* базовый размер админки */
+  --fs-l: 16px;
+  --fs-xl: 20px;  /* заголовок страницы */
+  --fs-2xl: 24px;
+
+  /* Отступы: сетка 4px */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* Радиусы */
+  --radius-s: 6px;    /* поля, маленькие кнопки */
+  --radius-m: 10px;   /* карточки, модалки, зоны */
+  --radius-pill: 999px;
+
+  /* Поверхности и границы */
+  --bg: #f4f6f9;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --surface-3: #eef1f5;
+  --border: #dde3ea;
+  --border-strong: #c3ccd6;
+
+  /* Текст — все рабочие цвета ≥4.5:1 на светлом фоне */
+  --text: #1f2d3d;
+  --text-secondary: #4a5a6a;
+  --text-muted: #5f7181;      /* 5.0:1 на белом — минимум для подписей */
+  --text-disabled: #8a97a3;   /* только для disabled-состояний */
+
+  /* Семантика. Заливки с белым текстом ≥4.5:1;
+     --warning и --info — только рамки/заливки/прогресс, НЕ фон для белого текста */
+  --accent: #0b5ed7;          /* белый текст 5.9:1 */
+  --accent-hover: #0a58ca;
+  --accent-subtle: #eaf2ff;
+  --success: #146c43;         /* белый текст 6.4:1 */
+  --success-subtle: #e7f4ec;
+  --danger: #c0392b;          /* белый текст 5.4:1 */
+  --danger-hover: #a93226;
+  --danger-subtle: #fbeceb;
+  --warning: #f0ad4e;
+  --warning-text: #8a5a00;    /* 5.7:1 на светлом */
+  --warning-subtle: #fdf3e3;
+  --info: #17a2b8;
+  --info-text: #0f6674;       /* 6.6:1 */
+  --info-subtle: #e3f4f7;
+  --deploy: #6f42c1;          /* кнопка «Обновить систему», белый текст 6.5:1 */
+  --deploy-hover: #5f37ab;
+
+  /* Тени */
+  --shadow-1: 0 1px 2px rgba(16, 24, 40, .05), 0 1px 3px rgba(16, 24, 40, .08);
+  --shadow-2: 0 4px 12px rgba(16, 24, 40, .12), 0 12px 32px rgba(16, 24, 40, .16);
+
+  /* Фокус */
+  --focus-ring: 0 0 0 3px rgba(11, 94, 215, .28);
+
+  /* Движение */
+  --tr-fast: 120ms;
+  --tr: 160ms;
+  --ease: cubic-bezier(.2, 0, 0, 1);
+}
+
+/* ============================================================
+   ОПЦИОНАЛЬНО (фаза C): тёмная тема.
+   Ничего не включает сама: только по атрибуту data-theme="dark".
+   ============================================================ */
+[data-theme="dark"] {
+  --bg: #12181f;
+  --surface: #1a222c;
+  --surface-2: #212b36;
+  --surface-3: #2a3542;
+  --border: #33404e;
+  --border-strong: #465566;
+  --text: #e8edf2;
+  --text-secondary: #b7c2cc;
+  --text-muted: #93a1af;
+  --text-disabled: #5f6c79;
+  --accent: #4d94ff;
+  --accent-hover: #6aa5ff;
+  --accent-subtle: #1d2c40;
+  --success: #2ea36b;
+  --success-subtle: #17301f;
+  --danger: #e05252;
+  --danger-hover: #ea6a6a;
+  --danger-subtle: #3a2020;
+  --warning: #e5a54b;
+  --warning-text: #e5b869;
+  --warning-subtle: #332a17;
+  --info: #3aa8bd;
+  --info-text: #6cc4d6;
+  --info-subtle: #14333a;
+  --deploy: #8b5cf6;
+  --deploy-hover: #9d75f8;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .4);
+  --shadow-2: 0 8px 32px rgba(0, 0, 0, .5);
+  --focus-ring: 0 0 0 3px rgba(77, 148, 255, .35);
+}
+
+/* ===== base layer (Фаза A) ===== */
+/* ============================================================
+   signage admin — базовый слой v1 (Фаза A, быстрые победы)
+   Вставить в <style> admin.html ПОСЛЕ блока токенов.
+   Ничего не ломает: классы существующей разметки сохранены,
+   задаются только оболочка, кнопки, поля, фокус и шапка.
+   ============================================================ */
+
+/* ---------- База ---------- */
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  font-family: var(--font-ui);
+  font-size: var(--fs-m);
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--bg);
+  margin: 0;
+  padding: var(--sp-5);
+}
+
+h1, h2, h3 { line-height: 1.25; }
+
+/* Единый видимый фокус для ВСЕХ интерактивных элементов (WCAG 2.4.7) */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+.modal :focus-visible { outline-offset: 1px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
+
+/* ---------- Шапка: sticky, липнет при прокрутке длинной ленты ---------- */
+header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-3);
+  margin: calc(-1 * var(--sp-5)) calc(-1 * var(--sp-5)) var(--sp-4);
+  padding: var(--sp-3) var(--sp-5);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+}
+header h1 { margin: 0; font-size: var(--fs-xl); font-weight: 650; letter-spacing: -.01em; }
+header > div { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+
+/* ---------- Сетка карточек ---------- */
+.screens {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: var(--sp-5);
+  align-items: start;
+  margin-top: 0;
+}
+@media (max-width: 480px) {
+  body { padding: var(--sp-3); }
+  .screens { grid-template-columns: 1fr; }
+  header { margin: calc(-1 * var(--sp-3)) calc(-1 * var(--sp-3)) var(--sp-3); padding: var(--sp-3); }
+}
+
+/* ---------- Карточка экрана ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  padding: var(--sp-4);
+  box-shadow: var(--shadow-1);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.card > * { margin: 0; }           /* ритм задаёт gap, а не локальные margin */
+
+.card h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin: 0;
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-l);
+  font-weight: 650;
+  font-family: var(--font-ui);     /* имя экрана больше не monospace */
+  min-width: 0;
+}
+.card h2 .sname {
+  font-family: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+/* Иконки-кнопки в заголовке: 28px, крупные цели (WCAG 2.5.8) */
+.card h2 .btn {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-s);
+}
+.card h2 .btn:hover { background: var(--border); color: var(--text); }
+.card h2 .btn[title="Удалить экран"] { color: var(--danger); }
+.card h2 .btn[title="Удалить экран"]:hover { background: var(--danger-subtle); border-color: var(--danger); }
+
+/* ---------- Бейдж «ЭФИР» ---------- */
+.badge {
+  position: absolute;
+  top: var(--sp-2);
+  left: var(--sp-2);
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 0, 0, .62);
+  color: #fff;
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  letter-spacing: .06em;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+}
+.badge::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff5252;
+  box-shadow: 0 0 0 0 rgba(255, 82, 82, .7);
+  animation: pulse 2.2s var(--ease) infinite;
+}
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 82, 82, .55); }
+  70%  { box-shadow: 0 0 0 7px rgba(255, 82, 82, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 82, 82, 0); }
+}
+
+/* ---------- Блоки внутри карточки: заголовок-«надзаголовок» ---------- */
+.box {
+  margin: 0;
+  padding: var(--sp-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  font-size: var(--fs-s);
+}
+.box > strong:first-child {
+  display: block;
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: var(--sp-2);
+}
+.box small { color: var(--text-muted); }
+.snapinfo { font-size: var(--fs-xs); color: var(--text-muted); }
+.snaprow { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
+
+/* ---------- Монитор ---------- */
+.monitor {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16/9;
+  background: #000;
+  border-radius: var(--radius-s);
+  overflow: hidden;
+}
+.monitor iframe { width: 100%; height: 100%; border: 0; pointer-events: none; }
+
+/* ---------- Кнопки: одна система ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 7px 14px;
+  font: inherit;
+  font-size: var(--fs-s);
+  font-weight: 600;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--tr-fast) var(--ease), border-color var(--tr-fast) var(--ease), transform var(--tr-fast) var(--ease);
+}
+.btn:hover:not(:disabled) { background: var(--surface-3); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Primary — одно главное действие на область (шапка, модалки) */
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+/* Success — «＋ Экран» */
+.btn.success { background: var(--success); border-color: var(--success); color: #fff; }
+.btn.success:hover:not(:disabled) { background: color-mix(in srgb, var(--success) 88%, #000); }
+
+/* Danger — необратимые действия */
+.btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+.btn.danger:hover:not(:disabled) { background: var(--danger-hover); border-color: var(--danger-hover); }
+
+/* Deploy — своя фиолетовая роль */
+.btn.deploy { background: var(--deploy); border-color: var(--deploy); color: #fff; }
+.btn.deploy:hover:not(:disabled) { background: var(--deploy-hover); border-color: var(--deploy-hover); }
+
+/* Компактные внутри блоков */
+.box .btn, .snaprow .btn, .fields .btn { min-height: 30px; padding: 4px 10px; }
+
+/* ---------- Поля ---------- */
+input[type=text], input[type=password], input[type=number], input[type=datetime-local], select {
+  font: inherit;
+  font-size: var(--fs-s);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-s);
+  padding: 6px 10px;
+  min-height: 32px;
+  transition: border-color var(--tr-fast) var(--ease), box-shadow var(--tr-fast) var(--ease);
+}
+input:hover:not(:disabled):not([readonly]), select:hover:not(:disabled) { border-color: var(--text-disabled); }
+input:focus, select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+input[readonly] { background: var(--surface-3); color: var(--text-secondary); }
+input:disabled { background: var(--surface-3); color: var(--text-disabled); cursor: not-allowed; }
+input::placeholder { color: var(--text-disabled); }
+
+/* URL-строка плеера — моно */
+.snaprow input[type=text] { flex: 1 1 200px; font-family: var(--font-mono); font-size: var(--fs-xs); }
+
+/* ---------- Dropzone ---------- */
+.drop {
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius-s);
+  padding: var(--sp-4);
+  margin: 0;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: center;
+  font-size: var(--fs-s);
+  transition: border-color var(--tr-fast) var(--ease), background var(--tr-fast) var(--ease);
+}
+.drop:hover { border-color: var(--accent); }
+.drop.over { border-color: var(--accent); border-style: solid; background: var(--accent-subtle); color: var(--accent); }
+
+/* ---------- Список слайдов ---------- */
+.cycle { margin: 0; font-weight: 650; font-size: var(--fs-s); }
+
+.slide {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  background: var(--surface-2);
+  padding: var(--sp-2);
+  padding-left: var(--sp-3);
+  border: 1px solid var(--border);
+  border-left: 4px solid transparent;
+  border-radius: var(--radius-s);
+  margin: 0;
+  font-size: var(--fs-s);
+  transition: border-color var(--tr-fast) var(--ease), background var(--tr-fast) var(--ease), opacity var(--tr-fast) var(--ease);
+}
+.slide.playing { border-left-color: var(--success); background: var(--success-subtle); }
+.slide.waiting { border-left-color: var(--warning); }
+.slide.ended   { border-left-color: var(--text-disabled); opacity: .85; }
+.slide.dirty   { border-left-color: var(--warning); background: var(--warning-subtle); }
+.slide.drag    { opacity: .35; }
+.slide.off     { opacity: .75; }
+
+.slide .n { width: 16px; text-align: center; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.grip { cursor: grab; color: var(--text-disabled); user-select: none; font-size: 16px; }
+.grip:hover { color: var(--text-secondary); }
+
+.ttl { flex-basis: 100%; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+.rel { flex-basis: 100%; font-size: var(--fs-xs); font-weight: 600; }
+.rel.waiting { color: var(--warning-text); }
+.rel.ended { color: var(--text-muted); }
+.vdur { white-space: nowrap; color: var(--text-secondary); }
+
+.mv button, .act button {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  width: 24px;
+  height: 24px;
+  min-width: 24px;   /* цели ≥24px: лучше 44 на таче (см. audit.md, P3) */
+  line-height: 1;
+  border-radius: var(--radius-s);
+}
+.mv button:hover, .act button:hover { background: var(--surface-3); color: var(--accent); }
+.act .del:hover { background: var(--danger-subtle); color: var(--danger); }
+.act .go { color: var(--success); }
+.act .save { color: var(--accent); font-size: 15px; }
+
+.sec-title { font-weight: 650; font-size: var(--fs-s); margin: var(--sp-3) 0 var(--sp-1); }
+.empty, .hint { color: var(--text-muted); font-size: var(--fs-s); margin: var(--sp-2); }
+
+/* ---------- Обработка видео ---------- */
+.job { border-left: 4px solid var(--info); }
+.job .bar { flex: 1; min-width: 120px; height: 8px; background: var(--surface-3); border-radius: var(--radius-pill); overflow: hidden; }
+.job .bar i { display: block; height: 100%; background: var(--info); width: 0; transition: width .5s var(--ease); }
+.job .err { color: var(--danger); flex-basis: 100%; white-space: normal; }
+
+/* ---------- Снапшоты ---------- */
+.snapimg {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16/9;
+  background: #000 center/cover;
+  border-radius: var(--radius-s);
+  color: var(--text-disabled);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-s);
+  overflow: hidden;
+}
+.snapimg img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.snaphist { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin-top: var(--sp-2); }
+.snaphist .it { position: relative; width: 72px; }
+.snaphist img {
+  width: 72px; height: 40px; object-fit: cover;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--border);
+  display: block; cursor: pointer;
+}
+.snaphist .it button {
+  position: absolute; top: -7px; right: -7px;
+  border: 2px solid var(--surface);
+  background: var(--danger); color: #fff;
+  border-radius: 50%;
+  width: 22px; height: 22px;
+  font-size: 12px; line-height: 18px; padding: 0;
+  cursor: pointer;
+}
+.snaphist .it button:hover { background: var(--danger-hover); }
+
+/* ---------- Модалки ---------- */
+.modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, .55);
+  justify-content: center;
+  align-items: center;
+  z-index: 50;
+  padding: var(--sp-4);
+}
+.modal-content {
+  background: var(--surface);
+  padding: var(--sp-5);
+  border-radius: var(--radius-m);
+  width: 400px;
+  max-width: 100%;
+  max-height: calc(100vh - 2 * var(--sp-5));
+  overflow: auto;
+  box-shadow: var(--shadow-2);
+}
+.modal-content h3 { margin: 0 0 var(--sp-3); font-size: var(--fs-l); font-weight: 650; }
+.fg { margin-bottom: var(--sp-3); }
+.fg label { display: block; font-size: var(--fs-s); font-weight: 600; margin-bottom: var(--sp-1); }
+.fg input { width: 100%; }
+
+/* ---------- Лог деплоя ---------- */
+#deployBox { margin: 0 0 var(--sp-4); }
+#deployLog {
+  max-height: 220px;
+  overflow: auto;
+  background: #0d1117;
+  color: #c9d1d9;
+  padding: var(--sp-3);
+  border-radius: var(--radius-s);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  margin: var(--sp-2) 0 0;
+  white-space: pre-wrap;
+}
+
+/* ---------- Статусная строка ---------- */
+.status { font-size: var(--fs-s); margin: 0; color: var(--text-secondary); }
+
+/* ---------- Детали/summary ---------- */
+details.sec { margin-top: 0; font-size: var(--fs-s); border-top: 1px solid var(--border); padding-top: var(--sp-2); }
+details.sec > summary { cursor: pointer; font-weight: 600; color: var(--text-secondary); border-radius: var(--radius-s); }
+details.snapdet > summary { color: var(--accent); }
+
 </style>
 </head>
 <body>
 <header>
   <h1>Управление экранами</h1>
   <div>
-    <button class="btn" id="deployBtn" style="display:none;background:#6f42c1;color:#fff" onclick="doDeploy()">⬆ Обновить систему</button>
-    <button class="btn" style="background:#28a745;color:#fff" onclick="addScreen()">＋ Экран</button>
+    <button class="btn deploy" id="deployBtn" hidden onclick="doDeploy()">⬆ Обновить систему</button>
+    <button class="btn success" onclick="addScreen()">＋ Экран</button>
     <button class="btn" onclick="logout()">Выйти</button>
   </div>
 </header>
-<div id="deployBox" style="display:none" class="box">
-  <strong>⬆ Автодеплой</strong> <span id="deployMsg" class="snapinfo"></span>
+<div id="deployBox" hidden class="box">
+  <strong>Автодеплой</strong> <span id="deployMsg" class="snapinfo"></span>
   <pre id="deployLog" style="max-height:220px;overflow:auto;background:#0d1117;color:#c9d1d9;padding:8px;border-radius:4px;font-size:11px;margin-top:6px;white-space:pre-wrap"></pre>
 </div>
 <div class="screens" id="screens">Загрузка…</div>
 
-<div class="modal" id="delModal">
+<div class="modal" id="delModal" role="dialog" aria-modal="true" aria-labelledby="delTitle">
   <div class="modal-content">
-    <h3>🗑 Удалить экран?</h3>
+    <h3 id="delTitle">🗑 Удалить экран?</h3>
     <p style="font-size:13px;color:#555;margin:0 0 10px">Экран: <b id="delName"></b></p>
     <p style="font-size:13px;color:#c0392b;margin:0 0 10px">
       Плейлист и снапшоты этого экрана будут удалены безвозвратно, ссылка перестанет работать.
@@ -104,15 +642,15 @@
     </p>
     <div class="fg"><label>Пароль администратора</label>
       <input type="password" id="delPass" autocomplete="current-password" placeholder="Введите пароль"></div>
-    <button class="btn" id="delGo" style="background:#c0392b;color:#fff" disabled onclick="delConfirm()">Удалить экран</button>
+    <button class="btn danger" id="delGo" disabled onclick="delConfirm()">Удалить экран</button>
     <button class="btn" onclick="closeDel()">Отмена</button>
     <div class="snapinfo" id="delMsg"></div>
   </div>
 </div>
 
-<div class="modal" id="regenModal">
+<div class="modal" id="regenModal" role="dialog" aria-modal="true" aria-labelledby="regenTitle">
   <div class="modal-content">
-    <h3>⚠ Перевыпустить ссылку?</h3>
+    <h3 id="regenTitle">⚠ Перевыпустить ссылку?</h3>
     <p style="font-size:13px;color:#555;margin:0 0 10px">Экран: <b id="regenName"></b></p>
     <p style="font-size:13px;color:#c0392b;margin:0 0 10px">
       Старая ссылка сразу перестанет работать. Плеер на этом экране перестанет вещать,
@@ -122,14 +660,14 @@
       <input type="checkbox" id="regenAck" style="width:auto;margin-top:2px">
       <span>Я понимаю, что старая ссылка перестанет работать и плеер придётся перенастроить.</span>
     </label>
-    <button class="btn" id="regenGo" style="background:#c0392b;color:#fff" disabled onclick="regenConfirm()">Перевыпустить ссылку</button>
+    <button class="btn danger" id="regenGo" disabled onclick="regenConfirm()">Перевыпустить ссылку</button>
     <button class="btn" onclick="closeRegen()">Отмена</button>
   </div>
 </div>
 
-<div class="modal" id="modal">
+<div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle">
   <div class="modal-content">
-    <h3>Новый слайд — <span id="mScreen"></span></h3>
+    <h3 id="mTitle">Новый слайд — <span id="mScreen"></span></h3>
     <div class="fg" id="durGroup"><label>Время показа (сек)</label><input type="number" id="duration" min="1"></div>
     <div class="fg"><label>Начало показа</label><input type="datetime-local" id="startDate"></div>
     <div class="fg"><label>Конец показа</label><input type="datetime-local" id="endDate"></div>
@@ -143,7 +681,7 @@
     <div id="videoNote" style="display:none;font-size:12px;color:#555;margin-bottom:10px">🎬 Видео конвертируется в MP4 (H.264, 1920×1080, до 60 кадр/с). Время показа равно длине ролика. Конвертация идёт в фоне: слайд попадёт в эфир, когда будет готов.</div>
     <div class="fg" id="soundGroup" style="display:none"><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="sound" style="width:auto"> Оставить звук</label></div>
     <div style="font-size:11px;color:#888;margin-bottom:10px">Файл автоматически приводится к 1920×1080, sRGB, без прозрачности.</div>
-    <button class="btn" id="saveBtn" style="background:green;color:#fff" onclick="upload()">Сохранить в эфир</button>
+    <button class="btn success" id="saveBtn" onclick="upload()">Сохранить в эфир</button>
     <button class="btn" onclick="closeModal()">Отмена</button>
   </div>
 </div>
@@ -174,21 +712,44 @@ async function api(url, opts) {
 }
 const postJson = (url, body) => api(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
+// ---------- уведомления вместо alert ----------
+// Не блокируют поток и различают успех/ошибку/инфо. Если контейнера нет — обычный alert.
+function toast(message, type = 'success', ms = 4200) {
+  const root = document.getElementById('toast-root');
+  if (!root) { window.alert(message); return; }
+  const icons = { success: '✓', error: '✕', info: 'ℹ' };
+  const color = type === 'error' ? '#c0392b' : type === 'info' ? '#0b5ed7' : '#146c43';
+  const el = document.createElement('div');
+  el.setAttribute('role', type === 'error' ? 'alert' : 'status');
+  el.style.cssText = 'display:flex;gap:10px;align-items:flex-start;background:#fff;border:1px solid #dde3ea;' +
+    'border-left:4px solid ' + color + ';border-radius:10px;box-shadow:0 4px 12px rgba(16,24,40,.12);' +
+    'padding:12px 14px;font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#1f2d3d;white-space:pre-line;';
+  const ico = document.createElement('span');
+  ico.style.cssText = 'flex:none;width:20px;height:20px;border-radius:50%;color:#fff;font-size:12px;' +
+    'display:flex;align-items:center;justify-content:center;margin-top:1px;background:' + color;
+  ico.textContent = icons[type] || 'ℹ';
+  const txt = document.createElement('div');
+  txt.textContent = message;
+  el.append(ico, txt);
+  root.append(el);
+  setTimeout(() => el.remove(), ms);
+}
+
 // ---------- каркас карточек ----------
 function build() {
   root.innerHTML = SCREENS.map(i => `
   <div class="card" data-screen="${i}">
-    <h2><span class="sname" id="name-${i}">${esc(screenName(i))}</span>
-      <button class="btn" title="Переименовать" onclick="renameScreen('${i}')">✏️</button>
-      <button class="btn" title="Удалить экран" style="color:#c0392b" onclick="deleteScreen('${i}')">🗑</button>
+    <h2><span class="sname" id="name-${i}" title="${esc(screenName(i))}">${esc(screenName(i))}</span>
+      <button class="btn" title="Переименовать" aria-label="Переименовать экран ${esc(screenName(i))}" onclick="renameScreen('${i}')">✏️</button>
+      <button class="btn" title="Удалить экран" aria-label="Удалить экран ${esc(screenName(i))}" onclick="deleteScreen('${i}')">🗑</button>
     </h2>
     <div class="monitor"><div class="badge">ЭФИР</div><iframe src="/player?token=${(SCREEN_INFO[i] || {}).token || ''}&preview=1"></iframe></div>
     <div class="status" id="st-${i}">…</div>
 
     <div class="box">
-      <strong>🔗 Ссылка плеера</strong> <small>(вставьте в BrightAuthor как HTML5-виджет)</small>
+      <strong>Ссылка плеера <small>вставьте в BrightAuthor как HTML5-виджет</small></strong>
       <div class="snaprow">
-        <input type="text" id="url-${i}" readonly value="${esc(playerUrl(i))}">
+        <input type="text" id="url-${i}" readonly value="${esc(playerUrl(i))}" aria-label="Ссылка плеера">
         <button class="btn" onclick="copyUrl('${i}')">Копировать</button>
         <button class="btn" onclick="regenUrl('${i}')">Перевыпустить</button>
       </div>
@@ -196,7 +757,7 @@ function build() {
     </div>
 
     <div class="box">
-      <strong>⏱ Время карусели</strong> — показ каждого слайда:
+      <strong>Время карусели <small>— показ каждого слайда:</small></strong>
       <input type="number" id="bulk-${i}" min="1" value="10"> с
       <button class="btn" onclick="bulkDur('${i}')">применить ко всем слайдам</button>
       <label><input type="checkbox" id="allt-${i}"> на всех экранах</label><br>
@@ -205,7 +766,7 @@ function build() {
 
     <div class="box def">
       <div class="defimg" id="defimg-${i}">нет</div>
-      <div><strong>Заглушка</strong> <small>(когда нет активных слайдов)</small><br>
+      <div><strong>Заглушка <small>когда нет активных слайдов</small></strong><br>
         <button class="btn" onclick="$('deffile-${i}').click()">Загрузить / заменить</button>
         <button class="btn" onclick="clearDefault('${i}')">Убрать</button>
         <label><input type="checkbox" id="all-${i}"> на всех экранах</label>
@@ -216,7 +777,7 @@ function build() {
       <input type="file" id="file-${i}" accept="image/png,image/jpeg,application/pdf,video/*,.mkv,.mov" hidden></div>
 
     <div class="box">
-      <strong>📸 Снапшот экрана</strong> <small>(реальный кадр с плеера через Local DWS)</small><br>
+      <strong>Снапшот экрана <small>реальный кадр с плеера через Local DWS</small></strong><br>
       <div class="snaprow">
         <input type="text" id="addr-${i}" placeholder="IP плеера, напр. 192.168.1.50 или https://...:443">
         <button class="btn" onclick="saveAddr('${i}')">Сохранить адрес</button>
@@ -258,7 +819,7 @@ function build() {
       fd.append('fit', 'fit');                    // заглушка: вписывается с чёрными полями
       fd.append('image', f);                      // файл — последним
       const r = await api('/api/default', { method: 'POST', body: fd });
-      if (!r.success) alert(r.message || 'Ошибка загрузки'); else notify(r);
+      if (!r.success) toast(r.message || 'Ошибка загрузки', 'error'); else notify(r);
       if (r.success) ($(`all-${i}`).checked ? SCREENS : [i]).forEach(reloadPreview);
       load();
     };
@@ -280,11 +841,11 @@ function human(ms) {
 // kind: active (в карусели) | waiting (ещё не началось) | ended (показ закончился)
 function rowHtml(s, i, n, kind) {
   const now = Date.now(), isVid = s.type === 'video';
-  const rel = kind === 'waiting' ? `⏳ начнётся через ${human(Date.parse(s.start_date) - now)}`
-            : kind === 'ended' ? `✔ закончился ${human(now - Date.parse(s.end_date))} назад` : '';
+  const rel = kind === 'waiting' ? `<span class="rel-dot dot-wait"></span>начнётся через ${human(Date.parse(s.start_date) - now)}`
+            : kind === 'ended' ? `<span class="rel-dot dot-end"></span>закончился ${human(now - Date.parse(s.end_date))} назад` : '';
   const thumb = isVid
     ? `<span class="thumbw"><video class="thumb" src="${s.url}#t=0.1" preload="metadata" muted playsinline></video><b class="vb">🎬</b></span>`
-    : `<img src="${s.url}">`;
+    : `<img src="${s.url}" alt="Превью слайда">`;
   const durField = isVid
     ? `<span class="vdur">🎬 видео · ${s.duration / 1000} с · ${s.sound ? '🔊 со звуком' : 'без звука'}</span>`
     : `<label>⏱ <input type="number" class="dur" min="1" step="1" value="${s.duration / 1000}"> с</label>`;
@@ -403,7 +964,7 @@ root.addEventListener('click', async e => {
     const now = new Date(), body = { screen, id, start_date: now.toISOString() };
     if (row.classList.contains('ended')) body.end_date = new Date(now.getTime() + 7 * 24 * 3600 * 1000).toISOString();
     const r = await postJson('/api/update', body);
-    if (!r.success) return alert(r.message || 'Не удалось изменить слайд');
+    if (!r.success) return toast(r.message || 'Не удалось изменить слайд', 'error');
     reloadPreview(screen); load();
     return;
   }
@@ -411,15 +972,15 @@ root.addEventListener('click', async e => {
     const durEl = row.querySelector('.dur');           // у видео поля времени нет: оно равно длине ролика
     const dur = durEl ? parseFloat(durEl.value) * 1000 : null;
     const sd = new Date(row.querySelector('.sd').value), ed = new Date(row.querySelector('.ed').value);
-    if ((durEl && !(dur >= 1000)) || isNaN(sd) || isNaN(ed)) return alert('Проверьте время и даты');
+    if ((durEl && !(dur >= 1000)) || isNaN(sd) || isNaN(ed)) return toast('Проверьте время и даты', 'error');
     const r = await postJson('/api/update', { screen, id, ...(durEl ? { duration: Math.round(dur) } : {}),
       start_date: sd.toISOString(), end_date: ed.toISOString() });
-    if (!r.success) return alert(r.message || 'Ошибка сохранения');
+    if (!r.success) return toast(r.message || 'Ошибка сохранения', 'error');
     row.classList.remove('dirty'); reloadPreview(screen); load();
   } else if (e.target.closest('.del')) {
     if (!confirm(row.classList.contains('job') ? 'Убрать ролик (конвертация будет остановлена)?' : 'Удалить слайд?')) return;
     const r = await postJson('/api/delete', { screen, id });
-    if (!r.success) return alert(r.message || 'Не удалось удалить слайд');
+    if (!r.success) return toast(r.message || 'Не удалось удалить слайд', 'error');
     // сразу убираем строку, не дожидаясь опроса (и не трогая несохранённые правки в соседних строках)
     plist[screen] = (plist[screen] || []).filter(s => s.id !== id);
     const cont = row.parentElement;
@@ -459,17 +1020,17 @@ async function saveOrder(cont) {
   const rows = [...cont.querySelectorAll('.slide')];
   rows.forEach((r, k) => { r.querySelector('.n').textContent = k + 1; });
   const r = await postJson('/api/reorder', { screen: i, ids: rows.map(x => x.dataset.id) });
-  if (!r.success) alert(r.message || 'Не удалось сохранить порядок');
+  if (!r.success) toast(r.message || 'Не удалось сохранить порядок', 'error');
   load();
 }
 
 async function bulkDur(i) {
   const d = parseFloat($(`bulk-${i}`).value) * 1000;
-  if (!(d >= 1000)) return alert('Минимум 1 секунда');
+  if (!(d >= 1000)) return toast('Минимум 1 секунда', 'error');
   const all = $(`allt-${i}`).checked;
   if (!confirm(`Установить ${d / 1000} с для всех слайдов ${all ? 'на всех экранах' : 'экрана ' + i}?`)) return;
   const r = await postJson('/api/duration-all', { screen: all ? 'all' : i, duration: Math.round(d) });
-  if (!r.success) alert(r.message || 'Ошибка');
+  if (!r.success) toast(r.message || 'Ошибка', 'error');
   document.querySelectorAll('.slide.dirty').forEach(x => x.classList.remove('dirty'));
   load();
 }
@@ -478,7 +1039,7 @@ async function clearDefault(i) {
   const all = $(`all-${i}`).checked;
   if (!confirm(all ? 'Убрать заглушку на всех экранах?' : 'Убрать заглушку?')) return;
   const r = await postJson('/api/default/delete', { screen: all ? 'all' : i });
-  if (!r.success) return alert(r.message || 'Не удалось убрать заглушку');
+  if (!r.success) return toast(r.message || 'Не удалось убрать заглушку', 'error');
   (all ? SCREENS : [i]).forEach(x => { pdef[x] = undefined; renderDefault(x); reloadPreview(x); });
   load();
 }
@@ -505,7 +1066,7 @@ function closeModal() { $('modal').style.display = 'none'; }
 
 function notify(r) {
   if (r.warnings && r.warnings.length)
-    alert((r.added ? `Добавлено слайдов: ${r.added}\n\n` : '') + 'Обратите внимание:\n• ' + r.warnings.join('\n• '));
+    toast((r.added ? `Добавлено слайдов: ${r.added}\n\n` : '') + 'Обратите внимание:\n• ' + r.warnings.join('\n• '), 'info', 7000);
 }
 
 // загрузка с индикатором прогресса (fetch его не умеет); видео бывают большими
@@ -525,7 +1086,7 @@ function xhrUpload(url, fd, onProgress) {
 
 async function upload() {
   const sd = new Date($('startDate').value), ed = new Date($('endDate').value);
-  if (isNaN(sd) || isNaN(ed)) return alert('Укажите даты');
+  if (isNaN(sd) || isNaN(ed)) return toast('Укажите даты', 'error');
   const vid = isVideoFile(curFile);
   const fd = new FormData();
   fd.append('screen', curScreen);
@@ -538,7 +1099,7 @@ async function upload() {
   const btn = $('saveBtn'); btn.disabled = true; btn.textContent = 'Загрузка… 0%';
   try {
     const r = await xhrUpload('/api/upload', fd, p => { btn.textContent = p < 100 ? `Загрузка… ${p}%` : 'Обработка…'; });
-    if (!r.success) return alert(r.message || 'Ошибка загрузки');   // окно остаётся открытым — можно сменить режим
+    if (!r.success) return toast(r.message || 'Ошибка загрузки', 'error');   // окно остаётся открытым — можно сменить режим
     notify(r); closeModal(); load(); reloadPreview(curScreen);
   } finally { btn.disabled = false; btn.textContent = 'Сохранить в эфир'; }
 }
@@ -577,14 +1138,31 @@ function markPlaying(i) {
 
 async function logout() { await fetch('/api/logout', { method: 'POST' }); location.reload(); }
 
+// ---------- доступность модалок: Escape и клик по затемнению ----------
+const MODALS = [
+  { id: 'delModal', close: () => closeDel() },
+  { id: 'regenModal', close: () => closeRegen() },
+  { id: 'modal', close: () => closeModal() }
+];
+function openModals() { return MODALS.filter(m => $(m.id) && $(m.id).style.display === 'flex'); }
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  const open = openModals();
+  if (open.length) { e.preventDefault(); open[open.length - 1].close(); }
+});
+MODALS.forEach(m => {
+  const el = $(m.id);
+  if (el) el.addEventListener('mousedown', e => { if (e.target === el) m.close(); });
+});
+
 // ---------- автодеплой ----------
 let deployPoll = null;
 async function initDeploy() {
   let d;
   try { d = await api('/api/deploy'); } catch { return; }
   if (!d.enabled) return;
-  $('deployBtn').style.display = '';
-  $('deployBox').style.display = '';
+  $('deployBtn').hidden = false;
+  $('deployBox').hidden = false;
   renderDeploy(d);
   if (d.running) startDeployPoll();
 }
@@ -602,7 +1180,7 @@ function renderDeploy(d) {
 async function doDeploy() {
   if (!confirm('Обновить систему: git pull + пересборка контейнера? Сервис ненадолго станет недоступен.')) return;
   const r = await postJson('/api/deploy', {});
-  if (!r.success) return alert(r.message || 'Не удалось запустить деплой');
+  if (!r.success) return toast(r.message || 'Не удалось запустить деплой', 'error');
   $('deployMsg').textContent = 'Деплой запущен…';
   startDeployPoll();
 }
@@ -632,7 +1210,7 @@ async function copyUrl(i) {
     const el = $(`url-${i}`); el.select(); document.execCommand('copy');   // запасной путь для http-контекста
   }
   const el = $(`url-${i}`); if (el) el.select();
-  alert('Ссылка скопирована:\n' + url);
+  toast('Ссылка скопирована:\n' + url);
 }
 
 let regenScreen = null;
@@ -656,12 +1234,12 @@ async function regenConfirm() {
   const btn = $('regenGo'); btn.disabled = true; btn.textContent = 'Перевыпускаю…';
   try {
     const r = await postJson(`/api/screens/${i}/token`, {});
-    if (!r.success) { alert(r.message || 'Не удалось перевыпустить ссылку'); return; }
+    if (!r.success) { toast(r.message || 'Не удалось перевыпустить ссылку', 'error'); return; }
     SCREEN_INFO[i] = r.screen;
     const el = $(`url-${i}`); if (el) el.value = playerUrl(i);
     const fr = root.querySelector(`.card[data-screen="${i}"] iframe`); if (fr) fr.src = `/player?token=${r.screen.token}&preview=1`;
     closeRegen();
-    alert('Ссылка перевыпущена. Новая ссылка (скопируйте в BrightAuthor):\n' + playerUrl(i));
+    toast('Ссылка перевыпущена. Новая ссылка (скопируйте в BrightAuthor):\n' + playerUrl(i), 'success', 9000);
   } finally { btn.textContent = 'Перевыпустить ссылку'; btn.disabled = false; }
 }
 
@@ -708,9 +1286,9 @@ async function renameScreen(i) {
   const cur = screenName(i);
   const name = prompt('Новое имя экрана (ссылка не меняется):', cur);
   if (name === null) return;
-  if (!name.trim()) return alert('Имя не может быть пустым');
+  if (!name.trim()) return toast('Имя не может быть пустым', 'error');
   const r = await postJson(`/api/screens/${i}`, { name: name.trim() });
-  if (!r.success) return alert(r.message || 'Не удалось переименовать');
+  if (!r.success) return toast(r.message || 'Не удалось переименовать', 'error');
   SCREEN_INFO[i] = r.screen;
   const el = $(`name-${i}`); if (el) el.textContent = r.screen.name;
   document.title = 'Панель экранов';
@@ -719,9 +1297,9 @@ async function renameScreen(i) {
 async function addScreen() {
   const name = prompt('Имя нового экрана (например, «Витрина слева»):');
   if (name === null) return;
-  if (!name.trim()) return alert('Имя не может быть пустым');
+  if (!name.trim()) return toast('Имя не может быть пустым', 'error');
   const r = await postJson('/api/screens', { name: name.trim() });
-  if (!r.success) return alert(r.message || 'Не удалось создать экран');
+  if (!r.success) return toast(r.message || 'Не удалось создать экран', 'error');
   location.reload();
 }
 
@@ -736,7 +1314,7 @@ async function loadAddr(i) {
 
 async function saveAddr(i) {
   const r = await postJson('/api/snapshot/players', { screen: i, address: $(`addr-${i}`).value.trim() });
-  if (!r.success) return alert(r.message || 'Не удалось сохранить адрес');
+  if (!r.success) return toast(r.message || 'Не удалось сохранить адрес', 'error');
   snapMsg(i, 'Адрес сохранён', '#28a745');
 }
 
@@ -769,13 +1347,13 @@ async function loadSnaps(i) {
   meta.innerHTML = `Последний кадр: ${when} · всего ${files.length} (хранится ${d.keep}) · ` +
     `<a href="/api/snapshot/${i}/latest" target="_blank" rel="noopener">открыть оригинал</a>`;
   hist.innerHTML = files.slice(0, 12).map(f =>
-    `<div class="it"><img src="/api/snapshot/${i}/file/${f}?t=${Date.now()}" title="${esc(f)}" onclick="window.open(this.src)"><button title="Удалить" onclick="delSnap('${i}','${f}')">×</button></div>`).join('');
+    `<div class="it"><img src="/api/snapshot/${i}/file/${f}?t=${Date.now()}" alt="Снапшот ${esc(f)}" title="${esc(f)}" style="cursor:zoom-in" onclick="window.open(this.src)"><button title="Удалить" aria-label="Удалить снапшот ${esc(f)}" onclick="delSnap('${i}','${f}')">×</button></div>`).join('');
 }
 
 async function delSnap(i, f) {
   if (!confirm('Удалить этот кадр?')) return;
   const r = await postJson(`/api/snapshot/${i}/delete`, { file: f });
-  if (!r.success) return alert(r.message || 'Не удалось удалить');
+  if (!r.success) return toast(r.message || 'Не удалось удалить', 'error');
   loadSnaps(i);
 }
 
@@ -791,5 +1369,7 @@ async function delSnap(i, f) {
   setInterval(() => SCREENS.forEach(statusLine), 1000);   // обратный отсчёт
 })();
 </script>
+
+<div id="toast-root" aria-live="polite" style="position:fixed;right:16px;bottom:16px;z-index:100;display:flex;flex-direction:column;gap:8px;max-width:420px"></div>
 </body>
 </html>
