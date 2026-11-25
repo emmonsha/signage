@@ -1,0 +1,478 @@
+const express = require('express');
+const multer = require('multer');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const session = require('express-session');
+const MemoryStore = require('memorystore')(session);
+const { processImage, openPdf, UserError, MAX_PDF_PAGES } = require('./processor');
+const video = require('./video');
+const auth = require('./auth');
+const { buildMatcher } = require('./netguard');
+
+const PORT = process.env.PORT || 3000;
+// Секрет подписи cookie сессии. Сессии хранятся в памяти и пропадают при перезапуске, поэтому постоянный секрет
+// ничего не даёт: по умолчанию генерируется новый при каждом старте. Задавайте SESSION_SECRET только если
+// запускаете несколько копий сервера за балансировщиком.
+const SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+
+// ---------- аутентификация админки ----------
+// Предпочтительно ADMIN_PASSWORD_HASH (или ADMIN_PASSWORD_HASH_FILE, например Docker secret) — хранится хэш, а не пароль.
+// Запасной вариант: ADMIN_PASSWORD / ADMIN_PASSWORD_FILE (открытый пароль).
+const PROD = process.env.NODE_ENV === 'production';
+let PASSWORD_HASH, PASSWORD_PLAIN, ADMIN_NETS;
+try {
+    PASSWORD_HASH = auth.readEnvOrFile('ADMIN_PASSWORD_HASH', true);
+    PASSWORD_PLAIN = auth.readEnvOrFile('ADMIN_PASSWORD');
+    ADMIN_NETS = buildMatcher(process.env.ADMIN_ALLOWED_NETS);
+} catch (e) { console.error(e.message); process.exit(1); }
+
+if (PASSWORD_HASH && !auth.isValidHash(PASSWORD_HASH)) {
+    console.error('ADMIN_PASSWORD_HASH имеет неверный формат. Создайте новый: npm run hash-password');
+    process.exit(1);
+}
+if (!PASSWORD_HASH && !PASSWORD_PLAIN) {
+    if (PROD) { console.error('Задайте ADMIN_PASSWORD_HASH (рекомендуется) или ADMIN_PASSWORD (см. .env.example)'); process.exit(1); }
+    PASSWORD_PLAIN = 'change-me';
+}
+if (PROD && PASSWORD_PLAIN === 'change-me' && !PASSWORD_HASH) { console.error('Задайте настоящий пароль админки'); process.exit(1); }
+
+const sha = s => crypto.createHash('sha256').update(String(s)).digest();
+async function checkPassword(input) {
+    if (typeof input !== 'string') return false;                   // в JSON может прийти число/объект
+    if (PASSWORD_HASH) return auth.verifyPassword(input, PASSWORD_HASH);
+    return crypto.timingSafeEqual(sha(input), sha(PASSWORD_PLAIN));
+}
+// Имена экранов (они же id в адресах). Можно переопределить: SCREENS=left,right,big_wall
+const SCREENS = (process.env.SCREENS || 'left,right,big_wall').split(',').map(s => s.trim()).filter(s => /^[a-z0-9_-]+$/i.test(s));
+const KEEP_MS = 9 * 30 * 24 * 3600 * 1000;                        // хранить 9 месяцев после окончания показа
+
+// Все изменяемые данные (плейлисты и картинки) лежат в STORAGE_DIR — в контейнере это отдельный том /storage
+const STORAGE = process.env.STORAGE_DIR || __dirname;
+const DATA = path.join(STORAGE, 'data');
+const UPLOADS = path.join(STORAGE, 'uploads');
+const PUBLIC = path.join(__dirname, 'public');
+fs.mkdirSync(DATA, { recursive: true });
+fs.mkdirSync(UPLOADS, { recursive: true });
+
+// ---------- хранилище плейлистов ----------
+const jsonFile = n => path.join(DATA, `playlist_${n}.json`);
+function readPlaylist(n) {
+    try { return JSON.parse(fs.readFileSync(jsonFile(n), 'utf8')); }
+    catch { return { playlist: [] }; }
+}
+function writePlaylist(n, data) {
+    const tmp = jsonFile(n) + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+    fs.renameSync(tmp, jsonFile(n));                              // атомарная запись
+}
+const validScreen = v => SCREENS.includes(String(v));
+
+// миграция со старых имён: playlist_1/2/3.json -> первые три экрана
+['1', '2', '3'].forEach((old, i) => {
+    const f = path.join(DATA, `playlist_${old}.json`);
+    if (SCREENS[i] && fs.existsSync(f) && !fs.existsSync(jsonFile(SCREENS[i]))) fs.renameSync(f, jsonFile(SCREENS[i]));
+});
+
+function removeFileIfUnused(url) {
+    const used = SCREENS.some(n => {
+        const d = readPlaylist(n);
+        return d.default_image === url || d.playlist.some(s => s.url === url);
+    });
+    if (used) return;
+    const p = path.join(UPLOADS, path.basename(url));
+    fs.unlink(p, () => {});
+}
+
+function autoClean() {
+    const limit = Date.now() - KEEP_MS;
+    for (const n of SCREENS) {
+        const data = readPlaylist(n);
+        const keep = data.playlist.filter(s => Date.parse(s.end_date) > limit);
+        const dropped = data.playlist.filter(s => !keep.includes(s));
+        if (dropped.length) {
+            data.playlist = keep;
+            writePlaylist(n, data);
+            dropped.forEach(s => removeFileIfUnused(s.url));
+        }
+    }
+}
+autoClean();
+setInterval(autoClean, 24 * 3600 * 1000);
+
+// ---------- загрузка файлов ----------
+// Сырые файлы падают во временную папку, затем обрабатываются (processor.js) и сохраняются в uploads/
+const MAX_VIDEO_MB = parseInt(process.env.MAX_VIDEO_MB) || 2048;
+const isVideoFile = f => /^video\//.test(f.mimetype || '') || video.VIDEO_EXTS.test(f.originalname || '');
+const TMP = path.join(DATA, 'tmp');
+fs.rmSync(TMP, { recursive: true, force: true });
+fs.mkdirSync(TMP, { recursive: true });
+const upload = multer({
+    storage: multer.diskStorage({ destination: TMP, filename: (req, file, cb) => cb(null, crypto.randomUUID()) }),
+    fileFilter: (req, file, cb) => cb(null, ['image/png', 'image/jpeg', 'application/pdf'].includes(file.mimetype) || isVideoFile(file)),
+    limits: { fileSize: MAX_VIDEO_MB * 1024 * 1024 }          // верхняя граница (видео); для картинок и PDF ниже своя проверка
+});
+const MAX_IMAGE_BYTES = 40 * 1024 * 1024;
+const cleanName = n => Buffer.from(String(n || ''), 'latin1').toString('utf8').replace(/[\u0000-\u001f]/g, '').slice(0, 80);
+const parseFit = v => ['fit', 'crop', 'reject'].includes(v) ? v : 'fit';
+
+// ---------- видео: очередь конвертации (по одному ролику, чтобы не перегружать процессор) ----------
+const jobs = new Map();            // id слайда -> задача
+const jobQueue = [];
+let jobBusy = false, VIDEO_OK = false;
+video.available().then(ok => {
+    VIDEO_OK = ok;
+    console.log(ok ? 'ffmpeg найден: загрузка видео включена' : '⚠ ffmpeg/ffprobe не найдены: загрузка видео отключена');
+});
+
+const rm = p => fs.unlink(p, () => {});
+function moveFile(src, dst) {
+    try { fs.renameSync(src, dst); }
+    catch (e) { if (e.code !== 'EXDEV') throw e; fs.copyFileSync(src, dst); fs.unlinkSync(src); }
+}
+function updateSlide(screen, id, fn) {                  // чтение-изменение-запись без пауз, поэтому гонок нет
+    const d = readPlaylist(screen);
+    const s = d.playlist.find(x => x.id === id);
+    if (!s) return null;
+    fn(s); writePlaylist(screen, d);
+    return s;
+}
+function enqueueJob(job) { jobs.set(job.id, job); jobQueue.push(job); pumpJobs(); }
+async function pumpJobs() {
+    if (jobBusy) return;
+    const job = jobQueue.shift();
+    if (!job) return;
+    jobBusy = true;
+    try { await runJob(job); } catch (e) { console.error('Ошибка задачи:', e); }
+    jobBusy = false; jobs.delete(job.id);
+    pumpJobs();
+}
+async function runJob(job) {
+    try {
+        if (!job.cancelled) {
+            job.runner = video.transcode(job.args, job.info.duration, p => { job.progress = p; });
+            await job.runner.promise;
+            if (!job.cancelled) {
+                moveFile(job.outTmp, job.outFinal);
+                const s = updateSlide(job.screen, job.id, x => { x.status = 'ready'; delete x.error; });
+                if (!s) rm(job.outFinal);               // слайд удалили, пока шла конвертация
+            }
+        }
+    } catch (err) {
+        if (!job.cancelled) {
+            console.error(`Конвертация ${job.id} не удалась: ${err.message}`);
+            updateSlide(job.screen, job.id, x => { x.status = 'failed'; x.error = String(err.message).slice(0, 200); });
+        }
+    } finally { rm(job.input); rm(job.outTmp); }
+}
+function cancelJob(id) {                                // слайд удалили: останавливаем конвертацию
+    const job = jobs.get(id);
+    if (!job) return;
+    job.cancelled = true;
+    const qi = jobQueue.indexOf(job);
+    if (qi >= 0) { jobQueue.splice(qi, 1); jobs.delete(id); rm(job.input); rm(job.outTmp); }   // ещё не начиналась
+    else if (job.runner) job.runner.kill();
+}
+// прогресс для админки подмешивается в ответ плейлиста
+const withProgress = d => ({ ...d, playlist: d.playlist.map(s => {
+    if (s.status !== 'processing') return s;
+    const j = jobs.get(s.id);
+    return { ...s, progress: j ? Math.round(j.progress) : 0, queued: !!(j && !j.runner) };
+}) });
+// после перезапуска сервера недоделанные конвертации потеряны (временные файлы очищены)
+SCREENS.forEach(n => {
+    const d = readPlaylist(n);
+    let changed = false;
+    d.playlist.forEach(s => {
+        if (s.status === 'processing') { s.status = 'failed'; s.error = 'Конвертация прервана перезапуском сервера — загрузите файл заново'; changed = true; }
+    });
+    if (changed) writePlaylist(n, d);
+});
+
+// ---------- приложение ----------
+const app = express();
+
+// За обратным прокси (nginx/Caddy/Traefik): TRUST_PROXY=1 (число прокси-узлов) — тогда видны реальный IP и https
+const tp = process.env.TRUST_PROXY;
+if (tp) app.set('trust proxy', /^\d+$/.test(tp) ? Number(tp) : tp === 'true' ? 1 : tp);
+
+// Проверка живости для Docker/мониторинга: хранилище должно быть доступно на запись
+app.get('/healthz', (req, res) => {
+    try { fs.accessSync(DATA, fs.constants.W_OK); fs.accessSync(UPLOADS, fs.constants.W_OK); res.json({ ok: true }); }
+    catch { res.status(503).json({ ok: false }); }
+});
+
+// Ограничение по сетям (ADMIN_ALLOWED_NETS): открыто только то, что нужно плеерам BrightSign.
+// Всё остальное (админка, загрузка, удаление, статус) — только из разрешённых сетей.
+const PLAYER_PATHS = [/^\/player\/?$/, /^\/api\/playlist\/[^/]+$/, /^\/uploads\//, /^\/api\/heartbeat$/, /^\/healthz$/];
+const blockedSeen = new Set();
+app.use((req, res, next) => {
+    if (!ADMIN_NETS || PLAYER_PATHS.some(r => r.test(req.path)) || ADMIN_NETS(req.ip)) return next();
+    if (!blockedSeen.has(req.ip)) { blockedSeen.add(req.ip); console.warn(`403: ${req.ip} вне ADMIN_ALLOWED_NETS (${req.method} ${req.path})`); }
+    res.status(403).send('Доступ запрещён: админка доступна только из разрешённых сетей');
+});
+app.use(express.json());
+app.use(session({
+    store: new MemoryStore({ checkPeriod: 24 * 3600 * 1000 }),    // чистит просроченные сессии (обычный MemoryStore течёт)
+    secret: SECRET, resave: false, saveUninitialized: false,
+    // COOKIE_SECURE=true — только если админка открыта по https (через прокси с TRUST_PROXY)
+    cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.COOKIE_SECURE === 'true', maxAge: 12 * 3600 * 1000 }
+}));
+app.use('/uploads', express.static(UPLOADS, { maxAge: '7d', immutable: true }));
+
+const checkAuth = (req, res, next) =>
+    req.session.authorized ? next() : res.status(401).json({ success: false, message: 'Нужна авторизация' });
+
+// простое ограничение попыток входа
+const fails = new Map();
+app.post('/api/login', async (req, res) => {
+    const ip = req.ip, rec = fails.get(ip) || { n: 0, until: 0 };
+    if (Date.now() < rec.until) return res.status(429).json({ success: false, message: 'Слишком много попыток, подождите' });
+    let ok = false;
+    try { ok = await checkPassword(req.body.password); } catch (e) { console.error('Ошибка проверки пароля:', e.message); }
+    if (ok) {
+        fails.delete(ip);
+        req.session.authorized = true;
+        return res.json({ success: true });
+    }
+    rec.n++;
+    if (rec.n >= 5) { rec.n = 0; rec.until = Date.now() + 15 * 60 * 1000; }
+    fails.set(ip, rec);
+    res.status(401).json({ success: false, message: 'Неверный пароль' });
+});
+app.post('/api/logout', (req, res) => req.session.destroy(() => res.json({ success: true })));
+
+app.get('/admin', (req, res) =>
+    res.sendFile(path.join(PUBLIC, req.session.authorized ? 'admin.html' : 'login.html')));
+
+// Страница-плеер для BrightSign: http://IP:3000/player?screen=1
+app.get('/player', (req, res) => res.sendFile(path.join(PUBLIC, 'player.html')));
+
+// Список экранов (единый источник имён для админки)
+app.get('/api/screens', (req, res) => res.json(SCREENS));
+
+// Плейлист (без пароля, чтобы читали плееры)
+app.get('/api/playlist/:id', (req, res) => {
+    if (!validScreen(req.params.id)) return res.status(404).json({ playlist: [] });
+    res.set('Cache-Control', 'no-store');
+    res.json(withProgress(readPlaylist(req.params.id)));
+});
+
+app.post('/api/upload', checkAuth, upload.single('image'), async (req, res) => {
+    const created = [];
+    let keepRaw = false;                                 // для видео исходник нужен до конца конвертации
+    try {
+        const { screen, duration, start_date, end_date } = req.body;
+        if (!req.file) throw new UserError('Нужен файл: PNG, JPG, PDF или видео');
+        const isVideo = isVideoFile(req.file);
+        const s = Date.parse(start_date), e = Date.parse(end_date), d = parseInt(duration);
+        if (!validScreen(screen) || isNaN(s) || isNaN(e) || e <= s || (!isVideo && !(d >= 1000))) throw new UserError('Неверные параметры');
+
+        const mode = parseFit(req.body.fit), title = cleanName(req.file.originalname);
+        const isPdf = req.file.mimetype === 'application/pdf';
+
+        if (isVideo) {                                   // длительность слайда = длина ролика; конвертация идёт в фоне
+            if (!VIDEO_OK) throw new UserError('Видео не поддерживается: на сервере не найден ffmpeg');
+            const info = await video.probeVideo(req.file.path);
+            const plan = video.planVideo(info, mode);    // при mode=reject и других пропорциях бросит ошибку
+            const sound = req.body.sound === 'true' && info.hasAudio;
+            const id = crypto.randomUUID(), outName = id + '.mp4';
+            const outTmp = path.join(TMP, outName), outFinal = path.join(UPLOADS, outName);
+            const data = readPlaylist(screen);
+            data.playlist.push({
+                id, type: 'video', status: 'processing', url: `/uploads/${outName}`,
+                duration: Math.ceil(info.duration * 1000), sound,
+                start_date: new Date(s).toISOString(), end_date: new Date(e).toISOString(), title
+            });
+            writePlaylist(screen, data);
+            enqueueJob({ id, screen, input: req.file.path, outTmp, outFinal, info, progress: 0,
+                         args: video.buildArgs(info, { mode, fps: plan.fps, sound }, req.file.path, outTmp) });
+            keepRaw = true;
+            return res.json({ success: true, added: 1, queued: true, warnings: plan.warnings });
+        }
+        if (req.file.size > MAX_IMAGE_BYTES) throw new UserError('Файл слишком большой (максимум 40 МБ для картинок и PDF)');
+        const warnings = new Set(), slides = [];
+
+        const add = async (input, page, pages) => {
+            const r = await processImage(input, mode);
+            r.warnings.forEach(w => warnings.add(w));
+            const name = crypto.randomUUID() + r.ext;
+            fs.writeFileSync(path.join(UPLOADS, name), r.buffer);
+            created.push(name);
+            slides.push({
+                id: crypto.randomUUID(), url: `/uploads/${name}`, duration: d,
+                start_date: new Date(s).toISOString(), end_date: new Date(e).toISOString(),
+                title, ...(isPdf ? { page, pages } : {})
+            });
+        };
+
+        if (isPdf) {                                   // каждая страница PDF -> отдельный слайд
+            const doc = await openPdf(req.file.path);
+            let k = 0;
+            for await (const png of doc) await add(png, ++k, doc.length);
+        } else {
+            await add(req.file.path);
+        }
+
+        const data = readPlaylist(screen);             // в плейлист пишем только если обработались ВСЕ страницы
+        data.playlist.push(...slides);
+        writePlaylist(screen, data);
+        res.json({ success: true, added: slides.length, warnings: [...warnings] });
+    } catch (err) {
+        created.forEach(n => fs.unlink(path.join(UPLOADS, n), () => {}));
+        if (!err.user) console.error(err);
+        res.status(err.user ? 400 : 500).json({ success: false, message: err.user ? err.message : 'Не удалось обработать файл' });
+    } finally {
+        if (req.file && !keepRaw) fs.unlink(req.file.path, () => {});
+    }
+});
+
+// Изменить время показа и/или даты одного слайда
+app.post('/api/update', checkAuth, (req, res) => {
+    const { screen, id, duration, start_date, end_date } = req.body;
+    if (!validScreen(screen)) return res.status(400).json({ success: false, message: 'Неверный экран' });
+    const data = readPlaylist(screen);
+    const s = data.playlist.find(x => x.id === id);
+    if (!s) return res.status(404).json({ success: false, message: 'Слайд не найден' });
+    const d = (duration === undefined || s.type === 'video') ? s.duration : parseInt(duration);   // у видео время = длина ролика
+    const st = start_date === undefined ? Date.parse(s.start_date) : Date.parse(start_date);
+    const en = end_date === undefined ? Date.parse(s.end_date) : Date.parse(end_date);
+    if (!(d >= 1000) || isNaN(st) || isNaN(en) || en <= st)
+        return res.status(400).json({ success: false, message: 'Неверные время или даты' });
+    s.duration = d; s.start_date = new Date(st).toISOString(); s.end_date = new Date(en).toISOString();
+    writePlaylist(screen, data);
+    res.json({ success: true });
+});
+
+// Изменить порядок показа: ids — id активных (или любых) слайдов экрана в новом порядке.
+// Остальные слайды остаются на своих местах.
+app.post('/api/reorder', checkAuth, (req, res) => {
+    const { screen, ids } = req.body;
+    if (!validScreen(screen) || !Array.isArray(ids)) return res.status(400).json({ success: false, message: 'Неверные параметры' });
+    const set = new Set(ids);
+    if (set.size !== ids.length) return res.status(400).json({ success: false, message: 'Повторяющиеся id' });
+    const data = readPlaylist(screen);
+    const slots = [];
+    data.playlist.forEach((s, k) => { if (set.has(s.id)) slots.push(k); });
+    if (slots.length !== ids.length) return res.status(409).json({ success: false, message: 'Список изменился, обновите страницу' });
+    const byId = new Map(data.playlist.map(s => [s.id, s]));
+    ids.forEach((id, n) => { data.playlist[slots[n]] = byId.get(id); });
+    writePlaylist(screen, data);
+    res.json({ success: true });
+});
+
+// Одно время показа для всех слайдов экрана (screen = имя или "all")
+app.post('/api/duration-all', checkAuth, (req, res) => {
+    const t = targets(req.body.screen), d = parseInt(req.body.duration);
+    if (!t || !(d >= 1000)) return res.status(400).json({ success: false, message: 'Неверные параметры' });
+    t.forEach(n => { const data = readPlaylist(n); data.playlist.forEach(s => { if (s.type !== 'video') s.duration = d; }); writePlaylist(n, data); });
+    res.json({ success: true });
+});
+
+app.post('/api/delete', checkAuth, (req, res) => {
+    const { screen, id } = req.body;
+    if (!validScreen(screen)) return res.status(400).json({ success: false });
+    const data = readPlaylist(screen);
+    const slide = data.playlist.find(s => s.id === id);
+    if (!slide) return res.status(404).json({ success: false });
+    data.playlist = data.playlist.filter(s => s.id !== id);
+    writePlaylist(screen, data);
+    cancelJob(id);
+    removeFileIfUnused(slide.url);
+    res.json({ success: true });
+});
+
+// ---------- состояние плееров (в памяти, плеер шлёт "пульс" каждые 10 сек и при смене слайда) ----------
+const playerState = {};
+app.post('/api/heartbeat', (req, res) => {
+    const b = req.body || {};
+    if (!validScreen(b.screen)) return res.status(400).json({ ok: false });
+    const n = String(b.screen), now = Date.now();
+    const kind = ['slide', 'default', 'black'].includes(b.kind) ? b.kind : 'black';
+    const slideId = typeof b.slideId === 'string' ? b.slideId.slice(0, 64) : null;
+    const key = `${kind}|${slideId}|${b.startedAt}`;
+    const prev = playerState[n];
+    playerState[n] = {
+        kind, slideId, key,
+        duration: Number(b.duration) || 0,
+        changedAt: prev && prev.key === key ? prev.changedAt : now,   // время сервера, а не часов плеера
+        lastSeen: now,
+        ip: req.ip
+    };
+    res.json({ ok: true });
+});
+app.get('/api/status', checkAuth, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ serverTime: Date.now(), screens: playerState });
+});
+
+// ---------- заглушка (default_image хранится в плейлисте экрана) ----------
+// screen = 1|2|3 или "all"
+const targets = s => s === 'all' ? SCREENS : (validScreen(s) ? [String(s)] : null);
+
+app.post('/api/default', checkAuth, upload.single('image'), async (req, res) => {
+    let created = null;
+    try {
+        if (!req.file) throw new UserError('Нужен файл PNG или JPG');
+        if (req.file.mimetype === 'application/pdf' || isVideoFile(req.file)) throw new UserError('Для заглушки нужна картинка PNG или JPG, а не PDF или видео');
+        const t = targets(req.body.screen);
+        if (!t) throw new UserError('Неверный экран');
+        const r = await processImage(req.file.path, parseFit(req.body.fit));
+        const name = crypto.randomUUID() + r.ext;
+        fs.writeFileSync(path.join(UPLOADS, name), r.buffer);
+        created = name;
+        const url = `/uploads/${name}`, old = [];
+        t.forEach(n => {
+            const d = readPlaylist(n);
+            if (d.default_image) old.push(d.default_image);
+            d.default_image = url;
+            writePlaylist(n, d);
+        });
+        old.forEach(removeFileIfUnused);
+        res.json({ success: true, warnings: r.warnings });
+    } catch (err) {
+        if (created) fs.unlink(path.join(UPLOADS, created), () => {});
+        if (!err.user) console.error(err);
+        res.status(err.user ? 400 : 500).json({ success: false, message: err.user ? err.message : 'Не удалось обработать файл' });
+    } finally {
+        if (req.file) fs.unlink(req.file.path, () => {});
+    }
+});
+
+app.post('/api/default/delete', checkAuth, (req, res) => {
+    const t = targets(req.body.screen);
+    if (!t) return res.status(400).json({ success: false });
+    const old = [];
+    t.forEach(n => {
+        const d = readPlaylist(n);
+        if (d.default_image) old.push(d.default_image);
+        delete d.default_image;
+        writePlaylist(n, d);
+    });
+    old.forEach(removeFileIfUnused);
+    res.json({ success: true });
+});
+
+app.use((err, req, res, next) => {           // ошибки multer (например, слишком большой файл)
+    res.status(400).json({ success: false, message: err.code === 'LIMIT_FILE_SIZE' ? `Файл слишком большой (максимум ${MAX_VIDEO_MB} МБ)` : 'Ошибка загрузки файла' });
+});
+
+const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Админка: http://localhost:${PORT}/admin`);
+    SCREENS.forEach(n => console.log(`Плеер ${n}: http://<IP>:${PORT}/player?screen=${n}`));
+    if (!PASSWORD_HASH) console.warn('⚠ Используется открытый ADMIN_PASSWORD. Лучше ADMIN_PASSWORD_HASH: npm run hash-password');
+    console.log(ADMIN_NETS ? `Админка ограничена: ${process.env.ADMIN_ALLOWED_NETS}` : '⚠ ADMIN_ALLOWED_NETS не задан: админка доступна из любой сети');
+});
+
+server.requestTimeout = 30 * 60 * 1000;    // большие видео по медленной сети: стандартные 5 минут на запрос не хватит
+
+// Корректная остановка по SIGTERM (docker stop / compose down), чтобы не оборвать запись плейлиста
+for (const sig of ['SIGTERM', 'SIGINT']) {
+    process.on(sig, () => {
+        console.log(`${sig}: останавливаюсь…`);
+        for (const j of jobs.values()) if (j.runner) j.runner.kill();     // не оставляем ffmpeg сиротой (временные файлы очистятся при старте)
+        server.close(() => process.exit(0));
+        server.closeIdleConnections();
+        setTimeout(() => process.exit(1), 8000).unref();
+    });
+}

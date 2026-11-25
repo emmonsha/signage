@@ -1,0 +1,20 @@
+{
+  "name": "brightsign-signage",
+  "version": "2.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.js",
+    "hash-password": "node hash-password.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "express-session": "^1.18.0",
+    "memorystore": "^1.6.8",
+    "multer": "^1.4.5-lts.1",
+    "pdf-to-img": "^7.0.2",
+    "sharp": "^0.35.5"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

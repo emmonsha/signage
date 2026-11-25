@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Вход</title>
+<style>
+  body { font-family:sans-serif; background:#2c3e50; display:flex; justify-content:center; align-items:center; height:100vh; margin:0; }
+  .box { background:#fff; padding:30px; border-radius:8px; box-shadow:0 4px 10px rgba(0,0,0,.2); text-align:center; width:300px; }
+  input { width:100%; padding:10px; margin:10px 0; box-sizing:border-box; border:1px solid #ccc; border-radius:4px; }
+  button { background:#007bff; color:#fff; border:none; padding:10px 20px; border-radius:4px; cursor:pointer; width:100%; }
+</style>
+</head>
+<body>
+<form class="box" onsubmit="login(event)">
+  <h2>Управление экранами</h2>
+  <input type="password" id="pass" placeholder="Пароль" autofocus>
+  <button type="submit">Войти</button>
+</form>
+<script>
+async function login(e) {
+  e.preventDefault();
+  const res = await fetch('/api/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: document.getElementById('pass').value })
+  });
+  const data = await res.json();
+  if (data.success) location.reload(); else alert(data.message);
+}
+</script>
+</body>
+</html>

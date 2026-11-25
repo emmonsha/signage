@@ -1,0 +1,42 @@
+name: brightsign-signage
+
+services:
+  signage:
+    build: .
+    image: brightsign-signage:latest
+    container_name: brightsign-signage
+    restart: unless-stopped
+    init: true                                   # корректные сигналы и зомби-процессы
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}   # рекомендуется (npm run hash-password); сервер сам сообщит, если пароль не задан
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}             # запасной вариант, открытый пароль
+      ADMIN_ALLOWED_NETS: ${ADMIN_ALLOWED_NETS:-}     # например 192.168.0.0/16,10.0.0.0/8 — пусто = без ограничений
+      SESSION_SECRET: ${SESSION_SECRET:-}            # необязательно, по умолчанию случайный при каждом старте
+      SCREENS: ${SCREENS:-left,right,big_wall}
+      MAX_PDF_PAGES: ${MAX_PDF_PAGES:-50}
+      MAX_VIDEO_MB: ${MAX_VIDEO_MB:-2048}             # максимальный размер загружаемого видео
+      MAX_VIDEO_SECONDS: ${MAX_VIDEO_SECONDS:-900}    # максимальная длина ролика
+      VIDEO_MAX_FPS: ${VIDEO_MAX_FPS:-60}             # потолок частоты кадров (30 — для слабых плееров)
+      VIDEO_THREADS: ${VIDEO_THREADS:-}               # потоков ffmpeg; пусто = авто
+      VIDEO_PRESET: ${VIDEO_PRESET:-medium}           # скорость/качество x264: veryfast … slow
+      TRUST_PROXY: ${TRUST_PROXY:-}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - storage:/storage                          # плейлисты (data/) и картинки (uploads/)
+    read_only: true                               # код в образе не изменяется
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g                                 # ffmpeg при конвертации 1080p берёт до ~1 ГБ
+    pids_limit: 512                               # потоки ffmpeg считаются как процессы
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  storage:

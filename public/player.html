@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<style>
+  html, body { margin:0; padding:0; width:100vw; height:100vh; overflow:hidden; background:#000; cursor:none; }
+  .slide { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:0; transition:opacity 1s ease-in-out; }
+  .slide.active { opacity:1; }
+</style>
+</head>
+<body>
+<img class="slide" id="a"><img class="slide" id="b">
+<video class="slide" id="v" muted playsinline></video>
+<script>
+const params = new URLSearchParams(location.search);
+const screenId = params.get('screen') || 'left';
+const isPreview = params.has('preview');   // превью в админке: не отправляет состояние, чтобы не подменять настоящий плеер
+const CACHE_KEY = 'playlist_' + screenId;
+const imgs = [document.getElementById('a'), document.getElementById('b')];
+const vid = document.getElementById('v');
+let playlist = [], defaultImage = null, idx = 0, front = 0, shownUrl = null;
+let cur = { kind: 'black', slideId: null, startedAt: Date.now(), duration: 0 };
+
+function report() {
+  if (isPreview) return;
+  fetch('/api/heartbeat', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ screen: screenId, ...cur }), keepalive: true
+  }).catch(() => {});
+}
+function setState(kind, slideId, duration) {
+  cur = { kind, slideId, duration: duration || 0, startedAt: Date.now() };
+  report();
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const preload = url => new Promise((ok, fail) => {
+  const i = new Image(); i.onload = () => ok(); i.onerror = fail; i.src = url;
+});
+
+async function refresh() {
+  try {
+    const r = await fetch(`/api/playlist/${screenId}?t=${Date.now()}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    playlist = d.playlist || [];
+    defaultImage = d.default_image || null;
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify(d)); } catch {}
+  } catch (e) {
+    // сервер недоступен — работаем по последнему сохранённому плейлисту
+    if (!playlist.length) {
+      try {
+        const d = JSON.parse(localStorage.getItem(CACHE_KEY)) || {};
+        playlist = d.playlist || []; defaultImage = d.default_image || null;
+      } catch {}
+    }
+  }
+}
+
+function activeSlides() {
+  const now = Date.now();
+  // слайды, которые ещё конвертируются или завершились ошибкой (status), не показываем
+  return playlist.filter(s => (!s.status || s.status === 'ready') && now >= Date.parse(s.start_date) && now <= Date.parse(s.end_date));
+}
+
+// показать картинку (кроссфейд); true — если картинка на экране
+async function showImage(url) {
+  if (shownUrl === url) return true;
+  try { await preload(url); } catch { return false; }
+  const back = 1 - front;
+  imgs[back].src = url;
+  imgs[back].classList.add('active');
+  imgs[front].classList.remove('active');
+  front = back; shownUrl = url;
+  hideVideo();
+  return true;
+}
+function showBlack() { imgs.forEach(i => i.classList.remove('active')); shownUrl = null; hideVideo(); }
+
+// ---- видео: один <video> на все ролики (на BrightSign аппаратный декодер один) ----
+let vidToken = 0;
+function hideVideo() {
+  const t = ++vidToken;
+  vid.classList.remove('active');
+  setTimeout(() => {                         // после затухания освобождаем декодер; токен защищает от гонки со следующим роликом
+    if (t === vidToken) { vid.pause(); vid.removeAttribute('src'); delete vid.dataset.url; vid.load(); }
+  }, 1200);
+}
+async function playVideo(s) {
+  vidToken++;                                // отменяет отложенную очистку от hideVideo
+  vid.muted = isPreview || !s.sound;         // в превью админки звука нет никогда
+  const again = vid.classList.contains('active') && vid.dataset.url === s.url && vid.readyState >= 2;
+  if (again) {
+    vid.currentTime = 0;                     // тот же ролик подряд: без перезагрузки и чёрной паузы
+  } else {
+    vid.dataset.url = s.url; vid.src = s.url;
+    await new Promise((ok, fail) => {
+      const t = setTimeout(() => fail(new Error('таймаут загрузки видео')), 20000);
+      vid.oncanplay = () => { clearTimeout(t); vid.oncanplay = null; ok(); };
+      vid.onerror = () => { clearTimeout(t); fail(new Error('ошибка видео')); };
+      vid.load();
+    });
+    imgs.forEach(i => i.classList.remove('active')); shownUrl = null;
+    vid.classList.add('active');
+  }
+  try { await vid.play(); } catch { vid.muted = true; await vid.play(); }   // политика автозапуска может запретить звук
+  setState('slide', s.id, s.duration);
+  await new Promise(done => {
+    const guard = setTimeout(done, s.duration + 5000);                       // страховка, если ended не придёт
+    vid.onended = vid.onerror = () => { clearTimeout(guard); done(); };
+  });
+  vid.onended = vid.onerror = null;
+}
+
+async function loop() {
+  while (true) {
+    const list = activeSlides();
+    if (!list.length) {                       // нет активных слайдов — заглушка (или чёрный экран)
+      if (defaultImage && await showImage(defaultImage)) { if (cur.kind !== 'default') setState('default', null); }
+      else { showBlack(); if (cur.kind !== 'black') setState('black', null); }
+      await sleep(3000); continue;
+    }
+    if (idx >= list.length) idx = 0;
+    const s = list[idx++];
+    if (s.type === 'video') {
+      try { await playVideo(s); } catch (e) { console.error(e); hideVideo(); await sleep(1000); }
+      continue;
+    }
+    if (!(await showImage(s.url))) { await sleep(1000); continue; }
+    setState('slide', s.id, s.duration);
+    await sleep(s.duration);
+  }
+}
+
+(async () => {
+  await refresh();
+  setInterval(refresh, 30000);
+  setInterval(report, 10000);               // "пульс" для админки               // обновление плейлиста каждые 30 сек
+  loop();
+})();
+</script>
+</body>
+</html>
