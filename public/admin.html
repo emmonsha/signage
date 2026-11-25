@@ -1034,7 +1034,8 @@ async function bulkDur(i) {
   const d = parseFloat($(`bulk-${i}`).value) * 1000;
   if (!(d >= 1000)) return toast('Минимум 1 секунда', 'error');
   const all = $(`allt-${i}`).checked;
-  if (!confirm(`Установить ${d / 1000} с для всех слайдов ${all ? 'на всех экранах' : 'экрана ' + i}?`)) return;
+  // screenName(i), а не i: id экрана (left/right/screen-2) — не то, что видит пользователь
+  if (!confirm(`Установить ${d / 1000} с для всех слайдов ${all ? 'на всех экранах' : 'экрана «' + screenName(i) + '»'}?`)) return;
   const r = await postJson('/api/duration-all', { screen: all ? 'all' : i, duration: Math.round(d) });
   if (!r.success) toast(r.message || 'Ошибка', 'error');
   document.querySelectorAll('.slide.dirty').forEach(x => x.classList.remove('dirty'));

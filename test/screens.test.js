@@ -17,12 +17,38 @@ test('tokenEqual: совпадение, различия и не-строки', 
     assert.equal(screens.tokenEqual(undefined, undefined), false);
 });
 
-test('makeId: латиница/цифры, кириллица -> запасной вариант', () => {
+test('makeId: латиница/цифры', () => {
     assert.equal(screens.makeId('Left Screen'), 'left-screen');
     assert.equal(screens.makeId('big_wall'), 'big_wall');
-    assert.equal(screens.makeId('Витрина'), 'screen');       // кириллица не в id
     assert.equal(screens.makeId(''), 'screen');
     assert.match(screens.makeId('a'.repeat(100)), /^a{40}$/);
+});
+
+// Кириллица транслитерируется: иначе все русские имена давали один id «screen»,
+// а «Склад №2» — вообще «2» (начинать id с цифры нельзя).
+test('makeId: кириллица транслитерируется в осмысленный id', () => {
+    assert.equal(screens.makeId('Витрина'), 'vitrina');
+    assert.equal(screens.makeId('Левый за охраной'), 'levyy-za-ohranoy');
+    assert.equal(screens.makeId('Экран у входа'), 'ekran-u-vhoda');
+    assert.equal(screens.makeId('Щит'), 'schit');
+    assert.equal(screens.makeId('Ёлка'), 'elka');
+});
+
+test('makeId: id не начинается с цифры', () => {
+    assert.equal(screens.makeId('2 склад'), 'screen-2-sklad');
+    assert.match(screens.makeId('№2'), /^screen-/);
+});
+
+test('makeId: разные русские имена дают разные id', () => {
+    const ids = ['Витрина', 'Склад', 'Офис', 'Стенд'].map(screens.makeId);
+    assert.equal(new Set(ids).size, 4, `совпали: ${ids.join(', ')}`);
+    ids.forEach(id => assert.match(id, /^[a-z0-9_-]+$/, `плохой id: ${id}`));
+});
+
+test('makeId: № и пунктуация не ломают id', () => {
+    assert.equal(screens.makeId('Склад №2'), 'sklad-2');
+    assert.equal(screens.makeId('Склад №2 (новый)'), 'sklad-2-novyy');
+    assert.equal(screens.makeId('!!!'), 'screen');
 });
 
 test('uniqueId: добавляет суффикс при конфликте', () => {
