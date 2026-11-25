@@ -6,6 +6,50 @@
 
 Нужны Docker Engine и плагин Compose v2 (`docker compose version`).
 
+### Вариант 1 — одной командой (`install.sh`)
+
+Скрипт `install.sh` делает всё сам: клонирует репозиторий (или берёт текущую папку),
+создаёт `.env`, задаёт пароль админки, собирает образ, поднимает контейнер и ждёт
+готовности. Он **идемпотентен**: повторный запуск не затирает `.env`, пароль и данные,
+поэтому годится и для установки с нуля, и для настройки уже работающего проекта.
+
+```bash
+# с сервера — одной строкой (подставьте свой репозиторий):
+SIGNAGE_REPO=https://github.com/USER/brightsign-signage.git \
+  curl -fsSL https://raw.githubusercontent.com/USER/brightsign-signage/main/install.sh | bash
+
+# либо из папки проекта (в том числе распакованного из ZIP):
+./install.sh
+```
+
+Что можно задать переменными (все необязательны):
+
+| Переменная | Назначение | По умолчанию |
+|---|---|---|
+| `SIGNAGE_DIR` | каталог установки | `~/brightsign-signage` |
+| `SIGNAGE_REPO` | git-URL репозитория | — (в режиме curl обязателен) |
+| `SIGNAGE_BRANCH` | ветка | `main` |
+| `SIGNAGE_PORT` | порт админки на хосте | `3000` |
+| `ADMIN_PASSWORD` | пароль админки (иначе спросит или сгенерирует) | — |
+| `ADMIN_USER` | логин локального администратора | `admin` |
+| `AUTH_MODE` | `local` / `freeipa` / `both` | `local` |
+| `ADMIN_ALLOWED_NETS` | ограничить админку сетью, напр. `192.168.0.0/16` | без ограничений |
+| `FREEIPA_*`, `DEPLOY_*` | настройки каталога и автодеплоя (как в `.env`) | — |
+| `SIGNAGE_YES=1` | без вопросов (автоматизация) | `0` |
+| `SIGNAGE_NO_UP=1` | только собрать, не запускать | `0` |
+
+Пример: развернуть в `/opt/signage`, порт 8080, сгенерировать пароль и ограничить админку сетью:
+
+```bash
+SIGNAGE_DIR=/opt/signage SIGNAGE_PORT=8080 ADMIN_ALLOWED_NETS=192.168.0.0/16 \
+  SIGNAGE_REPO=<git-url> bash install.sh
+```
+
+После запуска скрипт печатает адрес админки и (если пароль был сгенерирован) сам пароль —
+сохраните его. Сменить позже: `scripts/reset-password.sh`.
+
+### Вариант 2 — вручную
+
 ```bash
 cp .env.example .env && chmod 600 .env       # Compose сам читает .env из этой папки
 docker compose build
