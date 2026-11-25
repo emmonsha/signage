@@ -396,6 +396,10 @@ header > div { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
 .monitor iframe { width: 100%; height: 100%; border: 0; pointer-events: none; }
 
 /* ---------- Кнопки: одна система ---------- */
+/* Атрибут hidden должен побеждать display у .btn и подобных: иначе «скрытые»
+   кнопки продолжают висеть в интерфейсе (так вылезла «Применить ко всем экранам»). */
+[hidden] { display: none !important; }
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -773,7 +777,7 @@ function build() {
       <div class="defimg" id="defimg-${i}">нет</div>
       <div><strong>Заглушка <small>когда нет активных слайдов</small></strong><br>
         <button class="btn" onclick="$('deffile-${i}').click()">Загрузить / заменить</button>
-        <button class="btn" onclick="clearDefault('${i}')">Убрать</button>
+        <button class="btn" id="defdel-${i}" onclick="clearDefault('${i}')">Убрать</button>
         <label><input type="checkbox" id="all-${i}"> на всех экранах</label>
         <button class="btn" id="defcopy-${i}" hidden onclick="copyDefault('${i}')">Применить ко всем экранам</button>
         <span class="snapinfo" id="defcopy-msg-${i}"></span>
@@ -841,13 +845,30 @@ function build() {
 // раньше ничего не происходило — теперь показываем кнопку «Применить ко всем экранам»
 // и предлагаем действие сразу при постановке галочки.
 function refreshDefCopy(i) {
-  const box = $(`defcopy-${i}`), msg = $(`defcopy-msg-${i}`);
-  if (!box) return;
+  const box = $(`defcopy-${i}`), msg = $(`defcopy-msg-${i}`), del = $(`defdel-${i}`);
   const has = !!pdef[i];                       // есть ли заглушка на этом экране
   const checked = $(`all-${i}`).checked;
-  box.hidden = !(has && checked);              // кнопка нужна, только когда есть что копировать
-  if (has && checked && msg) msg.textContent = 'Заглушка уже загружена на этот экран — применить её к остальным?';
-  else if (msg) msg.textContent = '';
+
+  // «Убрать» действует на все экраны, если отмечена галочка — подписываем, чтобы не путало
+  if (del) {
+    del.textContent = checked ? 'Убрать со всех экранов' : 'Убрать';
+    del.title = checked ? 'Удалить заглушку у всех экранов' : 'Удалить заглушку этого экрана';
+  }
+  if (!box) return;
+  // кнопка копирования нужна, только когда есть что копировать (не все экраны ещё с этой картинкой)
+  box.hidden = !(has && checked && copyPending(i));
+  if (has && checked && msg) {
+    msg.textContent = copyPending(i)
+      ? 'Заглушка уже загружена на этот экран — применить её к остальным?'
+      : 'Заглушка уже стоит на всех экранах';
+  } else if (msg) msg.textContent = '';
+}
+
+// Нужно ли ещё копировать: false, если у всех экранов уже та же заглушка.
+function copyPending(i) {
+  const url = pdef[i];
+  if (!url) return false;
+  return SCREENS.some(x => pdef[x] !== url);
 }
 
 async function copyDefault(i) {
