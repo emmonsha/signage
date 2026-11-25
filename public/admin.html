@@ -94,6 +94,23 @@
 </div>
 <div class="screens" id="screens">Загрузка…</div>
 
+<div class="modal" id="regenModal">
+  <div class="modal-content">
+    <h3>⚠ Перевыпустить ссылку?</h3>
+    <p style="font-size:13px;color:#555;margin:0 0 10px">Экран: <b id="regenName"></b></p>
+    <p style="font-size:13px;color:#c0392b;margin:0 0 10px">
+      Старая ссылка сразу перестанет работать. Плеер на этом экране перестанет вещать,
+      пока вы не вставите в BrightAuthor новую ссылку.
+    </p>
+    <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;margin-bottom:14px">
+      <input type="checkbox" id="regenAck" style="width:auto;margin-top:2px">
+      <span>Я понимаю, что старая ссылка перестанет работать и плеер придётся перенастроить.</span>
+    </label>
+    <button class="btn" id="regenGo" style="background:#c0392b;color:#fff" disabled onclick="regenConfirm()">Перевыпустить ссылку</button>
+    <button class="btn" onclick="closeRegen()">Отмена</button>
+  </div>
+</div>
+
 <div class="modal" id="modal">
   <div class="modal-content">
     <h3>Новый слайд — <span id="mScreen"></span></h3>
@@ -602,14 +619,34 @@ async function copyUrl(i) {
   alert('Ссылка скопирована:\n' + url);
 }
 
-async function regenUrl(i) {
-  if (!confirm('Перевыпустить ссылку? Старая ссылка перестанет работать — плеер придётся перенастроить.')) return;
-  const r = await postJson(`/api/screens/${i}/token`, {});
-  if (!r.success) return alert(r.message || 'Не удалось перевыпустить ссылку');
-  SCREEN_INFO[i] = r.screen;
-  const el = $(`url-${i}`); if (el) el.value = playerUrl(i);
-  const fr = root.querySelector(`.card[data-screen="${i}"] iframe`); if (fr) fr.src = `/player?token=${r.screen.token}&preview=1`;
-  alert('Новая ссылка:\n' + playerUrl(i));
+let regenScreen = null;
+function regenUrl(i) {
+  regenScreen = i;
+  $('regenName').textContent = screenName(i);
+  $('regenAck').checked = false;             // каждое открытие — галочка снова снята
+  $('regenGo').disabled = true;              // кнопка неактивна, пока не подтвердят галочкой
+  $('regenModal').style.display = 'flex';
+}
+function closeRegen() { $('regenModal').style.display = 'none'; regenScreen = null; }
+
+// Галочка — единственное, что разблокирует кнопку. Случайный клик по кнопке бесполезен.
+document.getElementById('regenAck').addEventListener('change', e => {
+  document.getElementById('regenGo').disabled = !e.target.checked;
+});
+
+async function regenConfirm() {
+  const i = regenScreen;
+  if (!i || !$('regenAck').checked) return;
+  const btn = $('regenGo'); btn.disabled = true; btn.textContent = 'Перевыпускаю…';
+  try {
+    const r = await postJson(`/api/screens/${i}/token`, {});
+    if (!r.success) { alert(r.message || 'Не удалось перевыпустить ссылку'); return; }
+    SCREEN_INFO[i] = r.screen;
+    const el = $(`url-${i}`); if (el) el.value = playerUrl(i);
+    const fr = root.querySelector(`.card[data-screen="${i}"] iframe`); if (fr) fr.src = `/player?token=${r.screen.token}&preview=1`;
+    closeRegen();
+    alert('Ссылка перевыпущена. Новая ссылка (скопируйте в BrightAuthor):\n' + playerUrl(i));
+  } finally { btn.textContent = 'Перевыпустить ссылку'; btn.disabled = false; }
 }
 
 async function renameScreen(i) {
