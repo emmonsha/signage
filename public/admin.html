@@ -62,6 +62,15 @@
   .fg { margin-bottom:10px; } .fg label { display:block; font-size:13px; margin-bottom:3px; } .fg input { width:100%; padding:6px; box-sizing:border-box; }
   .btn { padding:8px 14px; border:none; border-radius:4px; cursor:pointer; }
   .box .btn { padding:3px 8px; font-size:12px; }
+  .snapimg { position:relative; width:100%; aspect-ratio:16/9; background:#000 center/cover; border-radius:6px; color:#888; display:flex; align-items:center; justify-content:center; font-size:12px; overflow:hidden; }
+  .snapimg img { width:100%; height:100%; object-fit:contain; display:block; }
+  .snapinfo { font-size:11px; color:#888; margin-top:4px; }
+  .snaprow { display:flex; gap:6px; align-items:center; margin-top:6px; flex-wrap:wrap; }
+  .snaprow input[type=text] { flex:1; min-width:120px; padding:4px; box-sizing:border-box; }
+  .snaphist { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+  .snaphist .it { position:relative; width:72px; }
+  .snaphist img { width:72px; height:40px; object-fit:cover; border-radius:3px; border:1px solid #ddd; display:block; cursor:pointer; }
+  .snaphist .it button { position:absolute; top:-6px; right:-6px; border:none; background:#c0392b; color:#fff; border-radius:50%; width:16px; height:16px; font-size:10px; line-height:16px; padding:0; cursor:pointer; }
 </style>
 </head>
 <body>
@@ -142,6 +151,22 @@ function build() {
 
     <div class="drop" id="drop-${i}">➕ Добавить слайд: перетащите PNG / JPG / PDF / видео или нажмите
       <input type="file" id="file-${i}" accept="image/png,image/jpeg,application/pdf,video/*,.mkv,.mov" hidden></div>
+
+    <div class="box">
+      <strong>📸 Снапшот экрана</strong> <small>(реальный кадр с плеера через Local DWS)</small><br>
+      <div class="snaprow">
+        <input type="text" id="addr-${i}" placeholder="IP плеера, напр. 192.168.1.50 или https://...:443">
+        <button class="btn" onclick="saveAddr('${i}')">Сохранить адрес</button>
+      </div>
+      <div class="snaprow">
+        <button class="btn" onclick="snapNow('${i}')">Снять снапшот</button>
+        <button class="btn" onclick="loadSnaps('${i}')">Обновить</button>
+        <span id="snapmsg-${i}" class="snapinfo"></span>
+      </div>
+      <div class="snapimg" id="snapimg-${i}">нет снимка</div>
+      <div class="snapinfo" id="snapmeta-${i}"></div>
+      <div class="snaphist" id="snaphist-${i}"></div>
+    </div>
 
     <div id="jobs-${i}" hidden></div>
     <div class="cycle" id="cycle-${i}"></div>
@@ -486,10 +511,58 @@ function markPlaying(i) {
 
 async function logout() { await fetch('/api/logout', { method: 'POST' }); location.reload(); }
 
+// ---------- снапшоты экрана ----------
+async function loadAddr(i) {
+  try {
+    const r = await api('/api/snapshot/players');
+    const p = r[i];
+    if (p) $(`addr-${i}`).value = (p.scheme ? p.scheme + '://' : '') + p.host + (p.port ? ':' + p.port : '');
+  } catch {}
+}
+
+async function saveAddr(i) {
+  const r = await postJson('/api/snapshot/players', { screen: i, address: $(`addr-${i}`).value.trim() });
+  if (!r.success) return alert(r.message || 'Не удалось сохранить адрес');
+  snapMsg(i, 'Адрес сохранён', '#28a745');
+}
+
+function snapMsg(i, text, color) { const el = $(`snapmsg-${i}`); el.textContent = text || ''; el.style.color = color || '#888'; }
+
+async function snapNow(i) {
+  snapMsg(i, 'Снимаю кадр…', '#007bff');
+  try {
+    const r = await postJson(`/api/snapshot/${i}`, {});
+    if (!r.success) { snapMsg(i, r.message || 'Ошибка', '#c0392b'); return; }
+    snapMsg(i, `Готово: ${r.width || '?'}×${r.height || '?'}`, '#28a745');
+    await loadSnaps(i);
+  } catch { snapMsg(i, 'Сервер недоступен', '#c0392b'); }
+}
+
+async function loadSnaps(i) {
+  let d;
+  try { d = await api(`/api/snapshot/${i}`); } catch { return; }
+  const files = (d && d.files) || [];
+  const img = $(`snapimg-${i}`), meta = $(`snapmeta-${i}`), hist = $(`snaphist-${i}`);
+  if (d.player && !$(`addr-${i}`).value) $(`addr-${i}`).value = (d.player.scheme ? d.player.scheme + '://' : '') + d.player.host + (d.player.port ? ':' + d.player.port : '');
+  if (!files.length) { img.textContent = 'нет снимка'; meta.textContent = ''; hist.innerHTML = ''; return; }
+  img.innerHTML = `<img src="/api/snapshot/${i}/file/${files[0]}?t=${Date.now()}" alt="снапшот">`;
+  meta.textContent = `Последний кадр: ${files[0].replace(/T/, ' ').replace(/\.(jpe?g|png)$/i, '')} · всего ${files.length} (хранится ${d.keep})`;
+  hist.innerHTML = files.slice(0, 12).map(f =>
+    `<div class="it"><img src="/api/snapshot/${i}/file/${f}?t=${Date.now()}" title="${esc(f)}" onclick="window.open(this.src)"><button title="Удалить" onclick="delSnap('${i}','${f}')">×</button></div>`).join('');
+}
+
+async function delSnap(i, f) {
+  if (!confirm('Удалить этот кадр?')) return;
+  const r = await postJson(`/api/snapshot/${i}/delete`, { file: f });
+  if (!r.success) return alert(r.message || 'Не удалось удалить');
+  loadSnaps(i);
+}
+
 (async () => {
   SCREENS = await fetch('/api/screens').then(r => r.json());
   build();
   await load();
+  SCREENS.forEach(i => { loadAddr(i); loadSnaps(i); });
   loadStatus();
   setInterval(load, 10000);
   setInterval(loadStatus, 5000);

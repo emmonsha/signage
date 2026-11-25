@@ -9,6 +9,7 @@ const { processImage, openPdf, UserError, MAX_PDF_PAGES } = require('./processor
 const video = require('./video');
 const auth = require('./auth');
 const freeipa = require('./freeipa');
+const snapshot = require('./snapshot');
 const { buildMatcher } = require('./netguard');
 
 const PORT = process.env.PORT || 3000;
@@ -71,6 +72,37 @@ const UPLOADS = path.join(STORAGE, 'uploads');
 const PUBLIC = path.join(__dirname, 'public');
 fs.mkdirSync(DATA, { recursive: true });
 fs.mkdirSync(UPLOADS, { recursive: true });
+
+// ---------- снапшоты экранов (реальный кадр с плеера BrightSign) ----------
+// Адреса плееров (экран -> host/port/scheme) лежат рядом с данными: data/players.json
+// Кадры хранятся в STORAGE/snapshots/<screen>/, хранится последние SNAPSHOT_KEEP штук.
+let SNAP;
+try { SNAP = snapshot.loadConfig(); }
+catch (e) { console.error(e.message); process.exit(1); }
+const PLAYERS_FILE = path.join(DATA, 'players.json');
+const SNAPSHOT_DIR = path.join(STORAGE, 'snapshots');
+fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
+function readPlayers() {
+    try { return JSON.parse(fs.readFileSync(PLAYERS_FILE, 'utf8')); }
+    catch { return {}; }
+}
+function writePlayers(o) {
+    const tmp = PLAYERS_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(o, null, 2));
+    fs.renameSync(tmp, PLAYERS_FILE);
+}
+const screenSnapDir = n => path.join(SNAPSHOT_DIR, n);
+// Список файлов снапшотов экрана, от новых к старым.
+function listSnapshots(n) {
+    try {
+        return fs.readdirSync(screenSnapDir(n)).filter(f => /\.(jpe?g|png)$/i.test(f)).sort().reverse();
+    } catch { return []; }
+}
+// Оставляет последние SNAP.keep кадров экрана, остальные удаляет.
+function pruneSnapshots(n) {
+    const files = listSnapshots(n);
+    files.slice(SNAP.keep).forEach(f => fs.unlink(path.join(screenSnapDir(n), f), () => {}));
+}
 
 // ---------- хранилище плейлистов ----------
 const jsonFile = n => path.join(DATA, `playlist_${n}.json`);
@@ -466,6 +498,82 @@ app.post('/api/heartbeat', (req, res) => {
 app.get('/api/status', checkAuth, (req, res) => {
     res.set('Cache-Control', 'no-store');
     res.json({ serverTime: Date.now(), screens: playerState });
+});
+
+// ---------- снапшоты экранов (реальный кадр с плеера через Local DWS) ----------
+// Адрес плеера на экран (host/port/scheme) — в data/players.json.
+app.get('/api/snapshot/players', checkAuth, (req, res) => res.json(readPlayers()));
+
+app.post('/api/snapshot/players', checkAuth, (req, res) => {
+    const { screen, address } = req.body || {};
+    if (!validScreen(screen)) return res.status(400).json({ success: false, message: 'Неверный экран' });
+    const players = readPlayers();
+    try {
+        if (!address || !String(address).trim()) delete players[screen];      // пусто = убрать адрес
+        else players[screen] = snapshot.parseAddress(address);
+    } catch (e) { return res.status(400).json({ success: false, message: e.message }); }
+    writePlayers(players);
+    res.json({ success: true, players });
+});
+
+// Снять кадр с плеера и сохранить. Тело: { screen }.
+app.post('/api/snapshot/:screen', checkAuth, async (req, res) => {
+    const screen = req.params.screen;
+    if (!validScreen(screen)) return res.status(400).json({ success: false, message: 'Неверный экран' });
+    const player = readPlayers()[screen];
+    if (!player) return res.status(400).json({ success: false, message: 'Адрес плеера не задан (укажите IP в карточке экрана)' });
+    try {
+        const creds = snapshot.credentialsFor(SNAP, screen);
+        const shot = await snapshot.capture(SNAP, player, creds);
+        const dir = screenSnapDir(screen);
+        fs.mkdirSync(dir, { recursive: true });
+        const ext = /\.png$/i.test(shot.filename) ? '.png' : '.jpg';
+        const name = new Date().toISOString().replace(/[:.]/g, '-') + ext;   // сортируется по времени
+        fs.writeFileSync(path.join(dir, name), shot.buffer);
+        pruneSnapshots(screen);
+        const list = listSnapshots(screen);
+        res.json({ success: true, file: name, width: shot.width, height: shot.height, deviceName: shot.deviceName, count: list.length });
+    } catch (e) {
+        console.error(`Снапшот ${screen}: ${e.code || e.message}`);
+        res.status(502).json({ success: false, message: `Не удалось снять кадр: ${e.message}` });
+    }
+});
+
+// Список сохранённых кадров экрана (от новых к старым).
+app.get('/api/snapshot/:screen', checkAuth, (req, res) => {
+    const screen = req.params.screen;
+    if (!validScreen(screen)) return res.status(400).json({ success: false });
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, files: listSnapshots(screen), keep: SNAP.keep, player: readPlayers()[screen] || null });
+});
+
+// Последний кадр экрана картинкой (для <img> в админке).
+app.get('/api/snapshot/:screen/latest', checkAuth, (req, res) => {
+    const screen = req.params.screen;
+    if (!validScreen(screen)) return res.status(404).end();
+    const files = listSnapshots(screen);
+    if (!files.length) return res.status(404).end();
+    res.set('Cache-Control', 'no-store');
+    res.sendFile(path.join(screenSnapDir(screen), files[0]));
+});
+
+// Отдать конкретный сохранённый кадр (имя — только базовое, без путей).
+app.get('/api/snapshot/:screen/file/:name', checkAuth, (req, res) => {
+    const screen = req.params.screen, name = path.basename(req.params.name);
+    if (!validScreen(screen) || !/\.(jpe?g|png)$/i.test(name)) return res.status(400).end();
+    const p = path.join(screenSnapDir(screen), name);
+    if (!fs.existsSync(p)) return res.status(404).end();
+    res.set('Cache-Control', 'no-store');
+    res.sendFile(p);
+});
+
+app.post('/api/snapshot/:screen/delete', checkAuth, (req, res) => {
+    const screen = req.params.screen;
+    if (!validScreen(screen)) return res.status(400).json({ success: false });
+    const name = path.basename(String((req.body || {}).file || ''));
+    if (!/\.(jpe?g|png)$/i.test(name)) return res.status(400).json({ success: false, message: 'Неверное имя файла' });
+    fs.unlink(path.join(screenSnapDir(screen), name), () => {});
+    res.json({ success: true, files: listSnapshots(screen) });
 });
 
 // ---------- заглушка (default_image хранится в плейлисте экрана) ----------

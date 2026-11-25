@@ -85,6 +85,25 @@ FREEIPA_USER_FILTER=(uid={username})
 недоступность каталога не даёт доступа, есть ограничение попыток. Полное описание и примеры —
 в `docs/03_FREEIPA_AUTH.md`. Тесты: `npm test`.
 
+## Снапшот экрана (что реально показывает)
+
+Кнопка «📸 Снять снапшот» в карточке экрана делает **реальный кадр с плеера** через Local DWS
+(`POST /api/v1/snapshot` → скачивание файла) и сохраняет историю в томе (последние N кадров).
+Адрес плеера задаётся в админке (поле «IP плеера»), логин/пароль DWS — в `.env`:
+
+```dotenv
+BRIGHTSIGN_DWS_USER=admin
+BRIGHTSIGN_DWS_PASSWORD=<пароль Local DWS>
+BRIGHTSIGN_DWS_SCHEME=http          # http | https
+BRIGHTSIGN_DWS_PORT=80              # 443 для https
+BRIGHTSIGN_SNAPSHOT_ORIGINAL=true   # кадр в оригинальном разрешении
+SNAPSHOT_KEEP=20                    # сколько последних кадров хранить на экран
+```
+
+Сервер сам ходит к плееру (нужен сетевой доступ сервер → плеер и включённый Local DWS).
+Авторизация DWS — Digest (fallback Basic). Для конкретного экрана можно переопределить
+логин/пароль: `BRIGHTSIGN_DWS_BIG_WALL_PASSWORD=…`. Подробнее — `docs/04_SNAPSHOTS.md`.
+
 ## Безопасность
 
 Три уровня, от простого к строгому:
@@ -163,6 +182,10 @@ docker compose start signage
 | `AUTH_MODE` | источник входа: `local` / `freeipa` / `both` | по FreeIPA, иначе local |
 | `ADMIN_USER` | логин локального администратора (режимы local/both) | admin |
 | `FREEIPA_*` | вход через FreeIPA (LDAP) — см. раздел «Вход через FreeIPA» | выкл. |
+| `BRIGHTSIGN_DWS_USER`, `BRIGHTSIGN_DWS_PASSWORD` | логин/пароль Local DWS плеера для снапшотов | admin, пусто |
+| `BRIGHTSIGN_DWS_SCHEME`, `BRIGHTSIGN_DWS_PORT` | схема/порт DWS | http, 80 |
+| `BRIGHTSIGN_SNAPSHOT_ORIGINAL` | снимать кадр в оригинальном разрешении | true |
+| `SNAPSHOT_KEEP` | сколько последних кадров хранить на экран | 20 |
 | `ADMIN_ALLOWED_NETS` | сети, из которых доступна админка (CIDR через запятую) | без ограничений |
 | `PORT` | порт на хосте | 3000 |
 | `SCREENS` | имена экранов через запятую | left,right,big_wall |
