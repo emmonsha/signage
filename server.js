@@ -11,6 +11,7 @@ const auth = require('./auth');
 const freeipa = require('./freeipa');
 const snapshot = require('./snapshot');
 const deploy = require('./deploy');
+const screens = require('./screens');
 const { buildMatcher } = require('./netguard');
 
 const PORT = process.env.PORT || 3000;
@@ -62,8 +63,9 @@ async function checkLocalPassword(input) {
     if (PASSWORD_HASH) return auth.verifyPassword(input, PASSWORD_HASH);
     return crypto.timingSafeEqual(sha(input), sha(PASSWORD_PLAIN));
 }
-// Имена экранов (они же id в адресах). Можно переопределить: SCREENS=left,right,big_wall
-const SCREENS = (process.env.SCREENS || 'left,right,big_wall').split(',').map(s => s.trim()).filter(s => /^[a-z0-9_-]+$/i.test(s));
+// Первичный список экранов — только для первого запуска; дальше имена и токены живут в реестре
+// data/screens.json (см. screens.js). Имена можно менять из админки, ссылки плееров — по токену.
+const SEED_SCREENS = (process.env.SCREENS || 'left,right,big_wall').split(',').map(s => s.trim()).filter(s => /^[a-z0-9_-]+$/i.test(s));
 const KEEP_MS = 9 * 30 * 24 * 3600 * 1000;                        // хранить 9 месяцев после окончания показа
 
 // Все изменяемые данные (плейлисты и картинки) лежат в STORAGE_DIR — в контейнере это отдельный том /storage
@@ -73,6 +75,23 @@ const UPLOADS = path.join(STORAGE, 'uploads');
 const PUBLIC = path.join(__dirname, 'public');
 fs.mkdirSync(DATA, { recursive: true });
 fs.mkdirSync(UPLOADS, { recursive: true });
+
+// ---------- реестр экранов (имена и токены ссылок плееров) ----------
+// id — стабильный (для файлов), name — отображаемое (можно менять), token — секрет ссылки плеера.
+const SCREENS_FILE = path.join(DATA, 'screens.json');
+let registry = screens.loadRegistry(SCREENS_FILE, SEED_SCREENS);
+fs.writeFileSync(SCREENS_FILE + '.tmp', JSON.stringify(registry, null, 2));
+fs.renameSync(SCREENS_FILE + '.tmp', SCREENS_FILE);          // зафиксировать токены при первом запуске
+let SCREENS = registry.screens.map(s => s.id);              // список id (плейлисты, файлы)
+const screenById = id => screens.byId(registry, id);
+const screenByToken = t => screens.byToken(registry, t);
+const validScreen = v => registry.screens.some(s => s.id === String(v));
+const playerUrl = token => `/player?token=${token}`;
+const publicScreen = s => ({ id: s.id, name: s.name, token: s.token, url: playerUrl(s.token) });
+function reloadRegistry() {
+    registry = screens.loadRegistry(SCREENS_FILE, []);
+    SCREENS = registry.screens.map(s => s.id);
+}
 
 // ---------- снапшоты экранов (реальный кадр с плеера BrightSign) ----------
 // Адреса плееров (экран -> host/port/scheme) лежат рядом с данными: data/players.json
@@ -121,7 +140,6 @@ function writePlaylist(n, data) {
     fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
     fs.renameSync(tmp, jsonFile(n));                              // атомарная запись
 }
-const validScreen = v => SCREENS.includes(String(v));
 
 // миграция со старых имён: playlist_1/2/3.json -> первые три экрана
 ['1', '2', '3'].forEach((old, i) => {
@@ -345,17 +363,75 @@ app.get('/api/auth', (req, res) => res.json({ mode: AUTH_MODE, username: IPA_LOG
 app.get('/admin', (req, res) =>
     res.sendFile(path.join(PUBLIC, req.session.authorized ? 'admin.html' : 'login.html')));
 
-// Страница-плеер для BrightSign: http://IP:3000/player?screen=1
+// Страница-плеер для BrightSign: http://IP:3000/player?token=<токен экрана>
 app.get('/player', (req, res) => res.sendFile(path.join(PUBLIC, 'player.html')));
 
-// Список экранов (единый источник имён для админки)
-app.get('/api/screens', (req, res) => res.json(SCREENS));
-
-// Плейлист (без пароля, чтобы читали плееры)
-app.get('/api/playlist/:id', (req, res) => {
-    if (!validScreen(req.params.id)) return res.status(404).json({ playlist: [] });
+// Список экранов с именами и токенами ссылок (только для админки).
+app.get('/api/screens', checkAuth, (req, res) => {
     res.set('Cache-Control', 'no-store');
-    res.json(withProgress(readPlaylist(req.params.id)));
+    res.json({ screens: registry.screens.map(publicScreen) });
+});
+
+// Создать новый экран. Тело: { name }.
+app.post('/api/screens', checkAuth, (req, res) => {
+    const name = screens.cleanName((req.body || {}).name, '');
+    if (!name) return res.status(400).json({ success: false, message: 'Укажите имя экрана' });
+    const taken = new Set(registry.screens.map(s => s.id));
+    const id = screens.uniqueId(screens.makeId(name), taken);
+    const s = { id, name, token: screens.newToken() };
+    registry.screens.push(s);
+    screens.save(SCREENS_FILE, registry);
+    reloadRegistry();
+    fs.mkdirSync(screenSnapDir(id), { recursive: true });
+    console.log(`Экран создан: ${s.name} (${s.id})`);
+    res.json({ success: true, screen: publicScreen(s) });
+});
+
+// Переименовать экран. Тело: { name }. id не меняется (файлы и ссылки остаются валидными).
+app.post('/api/screens/:id', checkAuth, (req, res) => {
+    const s = screenById(req.params.id);
+    if (!s) return res.status(404).json({ success: false, message: 'Экран не найден' });
+    const name = screens.cleanName((req.body || {}).name, '');
+    if (!name) return res.status(400).json({ success: false, message: 'Укажите имя экрана' });
+    s.name = name;
+    screens.save(SCREENS_FILE, registry);
+    res.json({ success: true, screen: publicScreen(s) });
+});
+
+// Перегенерировать токен ссылки (старая ссылка перестаёт работать).
+app.post('/api/screens/:id/token', checkAuth, (req, res) => {
+    const s = screenById(req.params.id);
+    if (!s) return res.status(404).json({ success: false, message: 'Экран не найден' });
+    s.token = screens.newToken();
+    screens.save(SCREENS_FILE, registry);
+    console.log(`Ссылка экрана «${s.name}» перевыпущена`);
+    res.json({ success: true, screen: publicScreen(s) });
+});
+
+// Удалить экран: плейлист и снапшоты убираются, ссылка перестаёт работать.
+app.post('/api/screens/:id/delete', checkAuth, (req, res) => {
+    const s = screenById(req.params.id);
+    if (!s) return res.status(404).json({ success: false, message: 'Экран не найден' });
+    const urls = [];
+    const d = readPlaylist(s.id);
+    if (d.default_image) urls.push(d.default_image);
+    (d.playlist || []).forEach(x => urls.push(x.url));
+    registry.screens = registry.screens.filter(x => x.id !== s.id);
+    screens.save(SCREENS_FILE, registry);
+    reloadRegistry();
+    try { fs.unlinkSync(jsonFile(s.id)); } catch {}
+    fs.rmSync(screenSnapDir(s.id), { recursive: true, force: true });
+    urls.forEach(removeFileIfUnused);
+    console.log(`Экран удалён: ${s.name} (${s.id})`);
+    res.json({ success: true });
+});
+
+// Плейлист плеера — по токену экрана (без пароля, чтобы читали плееры).
+app.get('/api/playlist/:token', (req, res) => {
+    const s = screenByToken(req.params.token);
+    if (!s) return res.status(404).json({ playlist: [] });
+    res.set('Cache-Control', 'no-store');
+    res.json(withProgress(readPlaylist(s.id)));
 });
 
 app.post('/api/upload', checkAuth, upload.single('image'), async (req, res) => {
@@ -486,8 +562,9 @@ app.post('/api/delete', checkAuth, (req, res) => {
 const playerState = {};
 app.post('/api/heartbeat', (req, res) => {
     const b = req.body || {};
-    if (!validScreen(b.screen)) return res.status(400).json({ ok: false });
-    const n = String(b.screen), now = Date.now();
+    const s = screenByToken(b.token);
+    if (!s) return res.status(400).json({ ok: false });
+    const n = s.id, now = Date.now();
     const kind = ['slide', 'default', 'black'].includes(b.kind) ? b.kind : 'black';
     const slideId = typeof b.slideId === 'string' ? b.slideId.slice(0, 64) : null;
     const key = `${kind}|${slideId}|${b.startedAt}`;
@@ -655,7 +732,7 @@ app.use((err, req, res, next) => {           // ошибки multer (напри�
 
 const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Админка: http://localhost:${PORT}/admin`);
-    SCREENS.forEach(n => console.log(`Плеер ${n}: http://<IP>:${PORT}/player?screen=${n}`));
+    registry.screens.forEach(s => console.log(`Плеер ${s.name}: http://<IP>:${PORT}${playerUrl(s.token)}`));
     if (!PASSWORD_HASH && LOCAL_LOGIN) console.warn('⚠ Используется открытый ADMIN_PASSWORD. Лучше ADMIN_PASSWORD_HASH: npm run hash-password');
     console.log(`Аутентификация: ${AUTH_MODE}` + (IPA_LOGIN ? ` (FreeIPA: ${IPA.url}, база ${IPA.userBaseDn})` : ''));
     console.log(DEPLOY ? `Автодеплой включён: агент ${DEPLOY.url}` : 'Автодеплой выключен (DEPLOY_ENABLED=true для кнопки «Обновить»)');

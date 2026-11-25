@@ -13,9 +13,9 @@
 <video class="slide" id="v" muted playsinline></video>
 <script>
 const params = new URLSearchParams(location.search);
-const screenId = params.get('screen') || 'left';
+const screenToken = params.get('token') || '';   // секретная ссылка экрана: /player?token=<token>
 const isPreview = params.has('preview');   // превью в админке: не отправляет состояние, чтобы не подменять настоящий плеер
-const CACHE_KEY = 'playlist_' + screenId;
+const CACHE_KEY = 'playlist_' + screenToken;
 const imgs = [document.getElementById('a'), document.getElementById('b')];
 const vid = document.getElementById('v');
 let playlist = [], defaultImage = null, idx = 0, front = 0, shownUrl = null;
@@ -25,7 +25,7 @@ function report() {
   if (isPreview) return;
   fetch('/api/heartbeat', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ screen: screenId, ...cur }), keepalive: true
+    body: JSON.stringify({ token: screenToken, ...cur }), keepalive: true
   }).catch(() => {});
 }
 function setState(kind, slideId, duration) {
@@ -40,7 +40,7 @@ const preload = url => new Promise((ok, fail) => {
 
 async function refresh() {
   try {
-    const r = await fetch(`/api/playlist/${screenId}?t=${Date.now()}`, { cache: 'no-store' });
+    const r = await fetch(`/api/playlist/${screenToken}?t=${Date.now()}`, { cache: 'no-store' });
     if (!r.ok) throw new Error(r.status);
     const d = await r.json();
     playlist = d.playlist || [];
