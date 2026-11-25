@@ -94,6 +94,22 @@
 </div>
 <div class="screens" id="screens">Загрузка…</div>
 
+<div class="modal" id="delModal">
+  <div class="modal-content">
+    <h3>🗑 Удалить экран?</h3>
+    <p style="font-size:13px;color:#555;margin:0 0 10px">Экран: <b id="delName"></b></p>
+    <p style="font-size:13px;color:#c0392b;margin:0 0 10px">
+      Плейлист и снапшоты этого экрана будут удалены безвозвратно, ссылка перестанет работать.
+      Действие необратимо.
+    </p>
+    <div class="fg"><label>Пароль администратора</label>
+      <input type="password" id="delPass" autocomplete="current-password" placeholder="Введите пароль"></div>
+    <button class="btn" id="delGo" style="background:#c0392b;color:#fff" disabled onclick="delConfirm()">Удалить экран</button>
+    <button class="btn" onclick="closeDel()">Отмена</button>
+    <div class="snapinfo" id="delMsg"></div>
+  </div>
+</div>
+
 <div class="modal" id="regenModal">
   <div class="modal-content">
     <h3>⚠ Перевыпустить ссылку?</h3>
@@ -649,6 +665,45 @@ async function regenConfirm() {
   } finally { btn.textContent = 'Перевыпустить ссылку'; btn.disabled = false; }
 }
 
+let delScreen = null;
+function deleteScreen(i) {
+  delScreen = i;
+  $('delName').textContent = screenName(i);
+  $('delPass').value = '';                 // каждое открытие — чистое поле
+  $('delGo').disabled = true;              // кнопка ждёт пароль
+  $('delMsg').textContent = '';
+  $('delModal').style.display = 'flex';
+  $('delPass').focus();
+}
+function closeDel() { $('delModal').style.display = 'none'; delScreen = null; }
+
+// Кнопка активна только при непустом пароле; Enter — отправить.
+document.getElementById('delPass').addEventListener('input', e => {
+  document.getElementById('delGo').disabled = !e.target.value;
+});
+document.getElementById('delPass').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !$('delGo').disabled) delConfirm();
+});
+
+async function delConfirm() {
+  const i = delScreen;
+  if (!i) return;
+  const password = $('delPass').value;
+  if (!password) return;
+  const btn = $('delGo'), msg = $('delMsg');
+  btn.disabled = true; btn.textContent = 'Удаляю…'; msg.textContent = ''; msg.style.color = '#888';
+  try {
+    const r = await postJson(`/api/screens/${i}/delete`, { password });
+    if (!r.success) {
+      msg.textContent = r.message || 'Не удалось удалить экран';
+      msg.style.color = '#c0392b';
+      $('delPass').value = ''; $('delPass').focus();
+      return;
+    }
+    location.reload();
+  } finally { btn.textContent = 'Удалить экран'; btn.disabled = !$('delPass').value; }
+}
+
 async function renameScreen(i) {
   const cur = screenName(i);
   const name = prompt('Новое имя экрана (ссылка не меняется):', cur);
@@ -659,13 +714,6 @@ async function renameScreen(i) {
   SCREEN_INFO[i] = r.screen;
   const el = $(`name-${i}`); if (el) el.textContent = r.screen.name;
   document.title = 'Панель экранов';
-}
-
-async function deleteScreen(i) {
-  if (!confirm(`Удалить экран «${screenName(i)}»? Плейлист и снапшоты будут удалены, ссылка перестанет работать.`)) return;
-  const r = await postJson(`/api/screens/${i}/delete`, {});
-  if (!r.success) return alert(r.message || 'Не удалось удалить экран');
-  location.reload();
 }
 
 async function addScreen() {

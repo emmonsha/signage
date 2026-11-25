@@ -357,6 +357,26 @@ app.post('/api/login', async (req, res) => {
 });
 app.post('/api/logout', (req, res) => req.session.destroy(() => res.json({ success: true })));
 
+// Подтверждение опасного действия паролем текущего пользователя (удаление экрана и т.п.).
+// Проверяет пароль того же источника, через который пользователь вошёл: каталог FreeIPA
+// или локальная учётка. Сетевые сбои каталога не считаются подтверждением.
+async function confirmPassword(req, password) {
+    const u = req.session.user || {};
+    const login = typeof u.username === 'string' && u.username ? u.username : ADMIN_USER;
+    if (typeof password !== 'string' || !password) return false;
+    if (IPA_LOGIN) {
+        try {
+            const r = await freeipa.authenticate(IPA, login, password);
+            if (r.ok) return true;
+        } catch (e) { console.error('LDAP при подтверждении:', e.code || e.message); }
+        if (!LOCAL_LOGIN) return false;
+    }
+    if (LOCAL_LOGIN && login.toLowerCase() === ADMIN_USER.toLowerCase()) {
+        try { return await checkLocalPassword(password); } catch (e) { console.error('Ошибка подтверждения пароля:', e.message); }
+    }
+    return false;
+}
+
 // Публичная подсказка для страницы входа: нужен ли ввод логина и какой источник активен.
 app.get('/api/auth', (req, res) => res.json({ mode: AUTH_MODE, username: IPA_LOGIN || AUTH_MODE === 'both' }));
 
@@ -409,9 +429,19 @@ app.post('/api/screens/:id/token', checkAuth, (req, res) => {
 });
 
 // Удалить экран: плейлист и снапшоты убираются, ссылка перестаёт работать.
-app.post('/api/screens/:id/delete', checkAuth, (req, res) => {
+// Требует подтверждения паролем текущего пользователя (защита от случайного удаления).
+app.post('/api/screens/:id/delete', checkAuth, async (req, res) => {
     const s = screenById(req.params.id);
     if (!s) return res.status(404).json({ success: false, message: 'Экран не найден' });
+    const password = (req.body || {}).password;
+    const key = `del|${req.ip}`;
+    if (throttled(key)) return res.status(429).json({ success: false, message: 'Слишком много попыток, подождите' });
+    if (!(await confirmPassword(req, password))) {
+        bumpFail(key);
+        console.warn(`Отказ удаления экрана «${s.name}»: неверный пароль (${req.ip})`);
+        return res.status(403).json({ success: false, message: 'Неверный пароль' });
+    }
+    fails.delete(key);
     const urls = [];
     const d = readPlaylist(s.id);
     if (d.default_image) urls.push(d.default_image);
