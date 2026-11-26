@@ -14,6 +14,20 @@ const fs = require('fs');
 const USER_RE = /^[a-z0-9._-]{1,64}$/;
 const MIN_PASSWORD_LEN = 10;
 
+// Транспортный (временный) пароль: его задаёт администратор при создании учётной записи
+// или при сбросе. Войти им можно, но до смены на собственный панель закрыта — иначе
+// админский пароль, переданный по телефону или в мессенджере, остался бы рабочим навсегда.
+// mustChange снимается, когда владелец сам задал новый пароль.
+const TEMP_PASSWORD_BYTES = 16;   // 128 бит энтропии; алфавит без похожих символов
+const TEMP_ALPHABET = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+function genTempPassword(bytes = TEMP_PASSWORD_BYTES) {
+    const buf = require('crypto').randomBytes(bytes);
+    let out = '';
+    for (const b of buf) out += TEMP_ALPHABET[b % TEMP_ALPHABET.length];
+    return out;
+}
+
 const clean = u => String(u == null ? '' : u).trim().toLowerCase();
 const clip = (s, n) => (typeof s === 'string' ? s.trim().replace(/[\u0000-\u001f]/g, '').slice(0, n) : '');
 const isValid = username => USER_RE.test(clean(username));
@@ -44,6 +58,9 @@ function normalize(reg) {
             note: clip(a && a.note, 120),
             createdAt: clip(a && a.createdAt, 40),
             createdBy: clip(a && a.createdBy, 64),
+            // Старые записи без поля считаем обычными (false) — их владельцы уже сидят
+            // со своими паролями, заставлять их менять пароль задним числом не нужно.
+            mustChange: !!(a && a.mustChange),
         });
     }
     accounts.sort((x, y) => x.username.localeCompare(y.username));
@@ -80,4 +97,11 @@ function remove(reg, username) {
     return normalize({ accounts: reg.accounts.filter(a => a.username !== u) });
 }
 
-module.exports = { USER_RE, MIN_PASSWORD_LEN, clean, clip, isValid, passwordProblem, normalize, loadRegistry, save, has, get, upsert, remove };
+// Выдать учётной записи новый транспортный пароль: кладём хэш и поднимаем флаг mustChange.
+function setTempPassword(reg, username, passwordHash) {
+    const rec = get(reg, username);
+    if (!rec) return reg;
+    return upsert(reg, { ...rec, passwordHash, mustChange: true });
+}
+
+module.exports = { USER_RE, MIN_PASSWORD_LEN, TEMP_ALPHABET, clean, clip, isValid, passwordProblem, genTempPassword, normalize, loadRegistry, save, has, get, upsert, remove, setTempPassword };

@@ -24,13 +24,23 @@ test('по умолчанию активен подраздел «Локальн
     assert.doesNotMatch(html, /id="paneLocal"[^>]*\bhidden\b/);
 });
 
-test('доменные учётные записи не просят пароль, локальные — просят', () => {
-    // форма локальной учётной записи содержит поле пароля
-    assert.match(html, /<input type="password" id="acctPass"/);
+test('доменные учётные записи не просят пароль, локальные — тоже (пароль выдаёт сервер)', () => {
     // в доменном подразделе нет поля пароля — только логин и комментарий
     const domainPane = html.slice(html.indexOf('id="paneDomain"'), html.indexOf('id="usersCatalogOff"'));
     assert.match(domainPane, /id="accessLogin"/);
     assert.doesNotMatch(domainPane, /type="password"/, 'доменной учётке пароль не задаётся — он в каталоге');
+    // Локальную учётную запись админ заводит без ввода пароля: его генерирует сервер.
+    const localPane = html.slice(html.indexOf('id="paneLocal"'), html.indexOf('id="paneDomain"'));
+    assert.doesNotMatch(localPane, /id="acctPass"/, 'админ больше не придумывает пароль локальной учётки');
+    assert.match(html, /id="pwdShowModal"/, 'выданный пароль показывается один раз');
+});
+
+test('есть сброс пароля и обязательная смена при первом входе', () => {
+    assert.match(html, /function askAcctReset\(/, 'нет функции сброса пароля');
+    assert.match(html, /\/api\/accounts\/reset/, 'сброс идёт через отдельный API');
+    assert.match(html, /id="myPassModal"/, 'нужно окно смены собственного пароля');
+    assert.match(html, /\/api\/me\/password/, 'смена пароля идёт через /api/me/password');
+    assert.match(html, /u\.mustChange/, 'панель должна уважать признак mustChange');
 });
 
 test('переключатель подразделов и сохранение выбора', () => {

@@ -377,7 +377,14 @@ app.use(session({
 app.use('/uploads', express.static(UPLOADS, { maxAge: '7d', immutable: true }));
 
 const checkAuth = (req, res, next) => {
-    if (sessionValid(req)) return next();
+    if (sessionValid(req)) {
+        // Транспортный пароль — вход только чтобы задать свой. Всё остальное закрыто,
+        // пока mustChange не снят сменой пароля (см. /api/me/password).
+        if (req.session.mustChange && !PATH_ALLOWED_WHILE_CHANGE.has(req.path)) {
+            return res.status(403).json({ success: false, code: 'password-change-required', message: 'Сначала смените пароль, выданный администратором' });
+        }
+        return next();
+    }
     // Сессия была, но перестала быть действительной (сменился пароль или админ убрал доступ) —
     // затираем её сразу, а не оставляем висеть в файле сессий.
     if (req.session && req.session.authorized) req.session.destroy(() => {});
@@ -396,7 +403,8 @@ function credFor(user) {
     const u = user || {};
     if (u.via === 'account') {
         const rec = accounts.get(accountsReg, u.username);
-        return crypto.createHash('sha256').update('signage-account-cred:' + (rec ? rec.passwordHash : 'removed')).digest('hex').slice(0, 24);
+        const base = 'signage-account-cred:' + (rec ? rec.passwordHash : 'removed') + ':' + (rec && rec.mustChange ? 'temp' : 'own');
+        return crypto.createHash('sha256').update(base).digest('hex').slice(0, 24);
     }
     return sessionCred();
 }
@@ -442,6 +450,11 @@ async function checkAccountPassword(username, password) {
     catch (e) { console.error('Ошибка проверки пароля учётной записи:', e.message); return null; }
 }
 
+// Пока учётная запись работает на транспортном пароле (его задал админ), сессия
+// ограничена сменой пароля: до неё ни экраны, ни остальные панели недоступны.
+// Так переданный по телефону/в мессенджере пароль не остаётся рабочим навсегда.
+const PATH_ALLOWED_WHILE_CHANGE = new Set(['/api/me', '/api/me/password', '/api/logout']);
+
 // Проверяет логин/пароль по выбранному источнику. Возвращает { ok, user?, reason? }.
 // Порядок: локальные учётки из панели (они заведены осознанно и пароль у них свой), затем каталог,
 // затем встроенная аварийная учётка ADMIN_USER. Сетевые/серверные ошибки FreeIPA не «пускают»
@@ -452,7 +465,7 @@ async function checkCredentials(username, password) {
 
     // 1) Локальная учётная запись из панели (accounts.json). Работает в любом AUTH_MODE.
     const acc = await checkAccountPassword(login, password);
-    if (acc) return { ok: true, user: { username: acc.username, displayName: acc.displayName || acc.username }, via: 'account' };
+    if (acc) return { ok: true, user: { username: acc.username, displayName: acc.displayName || acc.username }, via: 'account', mustChange: !!acc.mustChange };
 
     let accessDenied = false;                                     // в каталоге пустили, но нет в списке допущенных
     if (IPA_LOGIN) {
@@ -505,13 +518,15 @@ app.post('/api/login', async (req, res) => {
         req.session.authorized = true;
         r.user.via = r.via;                                       // источник входа: freeipa | account | local
         req.session.user = r.user;                                // для отображения в админке/логах
+        // Транспортный пароль: сессия действует, но панель закрыта до смены пароля.
+        req.session.mustChange = !!r.mustChange;
         // Отпечаток считаем ПОСЛЕ простановки via: для учётной записи из панели он привязан
         // к её хэшу пароля, для остальных — к отпечатку админки.
         req.session.cred = credFor(req.session.user);
         // Метаданные для панели «Пользователи»: видно, кто и откуда сейчас работает.
         req.session.meta = { loginAt: Date.now(), ip: req.ip, ua: String(req.get('user-agent') || '').slice(0, 200) };
-        console.log(`Вход разрешён: ${r.user.username} (${r.via}) с ${req.ip}`);
-        res.json({ success: true, user: { username: r.user.username, displayName: r.user.displayName } });
+        console.log(`Вход разрешён: ${r.user.username} (${r.via}) с ${req.ip}${r.mustChange ? ' [транспортный пароль]' : ''}`);
+        res.json({ success: true, user: { username: r.user.username, displayName: r.user.displayName }, mustChange: !!r.mustChange });
     });
 });
 app.post('/api/logout', (req, res) => req.session.destroy(() => res.json({ success: true })));
@@ -550,7 +565,43 @@ app.get('/api/auth', (req, res) => res.json({ mode: AUTH_MODE, username: IPA_LOG
 app.get('/api/me', (req, res) => {
     if (!sessionValid(req)) return res.status(401).json({ success: false });
     const u = req.session.user || {};
-    res.json({ success: true, username: u.username || ADMIN_USER, displayName: u.displayName || u.username || ADMIN_USER, via: u.via || null });
+    res.json({ success: true, username: u.username || ADMIN_USER, displayName: u.displayName || u.username || ADMIN_USER, via: u.via || null, mustChange: !!req.session.mustChange });
+});
+
+// Смена собственного пароля вошедшим пользователем. Работает и для транспортного пароля
+// (тогда снимается mustChange), и для обычной смены по желанию.
+// Тело: { currentPassword, newPassword }. После смены все прочие сессии отзываются:
+// отпечаток сессии привязан к хэшу пароля, так что старые cookie перестают действовать.
+app.post('/api/me/password', checkAuth, async (req, res) => {
+    const b = req.body || {};
+    const me = req.session.user || {};
+    const forced = !!req.session.mustChange;              // сессия ещё на транспортном пароле
+    if (me.via !== 'account') {
+        return res.status(400).json({ success: false, message: 'Смена пароля здесь доступна только локальным учётным записям; пароль доменной учётки меняется в каталоге' });
+    }
+    const username = accounts.clean(me.username);
+    const rec = accounts.get(accountsReg, username);
+    if (!rec) return res.status(400).json({ success: false, message: 'Учётная запись не найдена' });
+    if (!forced) {
+        // Обычная смена: требуем текущий пароль.
+        if (!(await checkAccountPassword(username, b.currentPassword))) return res.status(403).json({ success: false, message: 'Неверный текущий пароль' });
+    }
+    const pwProblem = accounts.passwordProblem(b.newPassword);
+    if (pwProblem) return res.status(400).json({ success: false, message: pwProblem });
+    if (await checkAccountPassword(username, b.newPassword)) return res.status(400).json({ success: false, message: 'Новый пароль совпадает с текущим — выберите другой' });
+
+    let passwordHash;
+    try { passwordHash = await auth.hashPassword(b.newPassword); }
+    catch (e) { console.error('Ошибка хэширования пароля:', e.message); return res.status(500).json({ success: false, message: 'Внутренняя ошибка' }); }
+
+    accountsReg = accounts.upsert(accountsReg, { ...rec, passwordHash, mustChange: false });
+    accounts.save(ACCOUNTS_FILE, accountsReg);
+    reloadAccounts();
+    // После смены пароля своя сессия должна остаться действительной: ставим новый отпечаток.
+    req.session.mustChange = false;
+    req.session.cred = credFor(req.session.user);
+    console.log(`Пароль сменён пользователем: «${username}» (${req.ip}); прочие сессии отозваны`);
+    res.json({ success: true });
 });
 
 // ---------- доступ: список допущенных учётных записей каталога ----------
@@ -701,7 +752,7 @@ app.post('/api/users/delete', checkAuth, async (req, res) => {
 // только хэшем (scrypt). Все такие учётки — равноправные администраторы. Встроенную ADMIN_USER
 // из .env создать/удалить отсюда нельзя: это аварийный вход, он всегда остаётся — чтобы не
 // остаться без входа, если настройки каталога окажутся нерабочими.
-const publicAccount = a => ({ username: a.username, displayName: a.displayName || '', note: a.note || '', createdAt: a.createdAt || null, createdBy: a.createdBy || null });
+const publicAccount = a => ({ username: a.username, displayName: a.displayName || '', note: a.note || '', createdAt: a.createdAt || null, createdBy: a.createdBy || null, mustChange: !!a.mustChange });
 const builtinAccount = () => ({ username: ADMIN_USER, displayName: (AUTH_MODE === 'local' || AUTH_MODE === 'both') ? `${ADMIN_USER} (встроенная)` : ADMIN_USER, builtin: true });
 
 app.get('/api/accounts', checkAuth, (req, res) => {
@@ -713,7 +764,11 @@ app.get('/api/accounts', checkAuth, (req, res) => {
     });
 });
 
-// Создать (или сменить пароль) локальной учётной записи. Тело: { username, password, displayName?, note? }.
+// Создать локальную учётную запись или сменить ей пароль администратором.
+// Тело: { username, displayName?, note?, password? }.
+//   • без password — пароль генерирует сервер и возвращает один раз в ответе;
+//   • с password — используется указанный (админ придумал свой);
+// В обоих случаях он ТРАНСПОРТНЫЙ: владелец обязан сменить его при первом входе.
 app.post('/api/accounts', checkAuth, async (req, res) => {
     const b = req.body || {};
     const username = accounts.clean(b.username);
@@ -723,12 +778,19 @@ app.post('/api/accounts', checkAuth, async (req, res) => {
     if (username === ADMIN_USER.toLowerCase()) {
         return res.status(400).json({ success: false, message: `«${ADMIN_USER}» — встроенная учётная запись, её пароль задаётся в .env (ADMIN_PASSWORD_HASH)` });
     }
-    const pwProblem = accounts.passwordProblem(b.password);
-    if (pwProblem) return res.status(400).json({ success: false, message: pwProblem });
+
+    // Пароль: переданный администратором либо сгенерированный. Длина сгенерированного
+    // заведомо достаточна; пользовательский проверяем тем же правилом.
+    const generated = (typeof b.password !== 'string' || b.password === '');
+    const password = generated ? accounts.genTempPassword() : b.password;
+    if (!generated) {
+        const pwProblem = accounts.passwordProblem(password);
+        if (pwProblem) return res.status(400).json({ success: false, message: pwProblem });
+    }
 
     const existed = accounts.has(accountsReg, username);
     let passwordHash;
-    try { passwordHash = await auth.hashPassword(b.password); }
+    try { passwordHash = await auth.hashPassword(password); }
     catch (e) { console.error('Ошибка хэширования пароля:', e.message); return res.status(500).json({ success: false, message: 'Внутренняя ошибка' }); }
 
     const prev = accounts.get(accountsReg, username);
@@ -736,6 +798,7 @@ app.post('/api/accounts', checkAuth, async (req, res) => {
         username,
         displayName: accounts.clip(b.displayName, 80) || (prev && prev.displayName) || '',
         passwordHash,
+        mustChange: true,                                  // пароль транспортный — сменить при первом входе
         note: accounts.clip(b.note, 120) || (prev && prev.note) || '',
         createdAt: (prev && prev.createdAt) || new Date().toISOString(),
         createdBy: (prev && prev.createdBy) || ((req.session.user && req.session.user.username) || ADMIN_USER),
@@ -743,8 +806,36 @@ app.post('/api/accounts', checkAuth, async (req, res) => {
     accountsReg = accounts.upsert(accountsReg, rec);
     accounts.save(ACCOUNTS_FILE, accountsReg);
     reloadAccounts();
-    console.log(`Локальная учётная запись: ${existed ? 'смена пароля' : 'создана'} «${username}» (${rec.createdBy})`);
-    res.json({ success: true, account: publicAccount(accounts.get(accountsReg, username) || rec), created: !existed });
+    console.log(`Локальная учётная запись: ${existed ? 'сброс пароля' : 'создана'} «${username}» (${rec.createdBy}); пароль ${generated ? 'сгенерирован' : 'задан админом'}, смена при первом входе`);
+    // Открытый пароль отдаём ОДИН раз — сохранить его больше негде (в файле только хэш).
+    res.json({ success: true, account: publicAccount(accounts.get(accountsReg, username) || rec), created: !existed, generated, password });
+});
+
+// Сброс пароля учётной записи: выдаём новый транспортный пароль (генерируем), старый сразу
+// перестаёт действовать, все сессии этой учётки отзываются. Подтверждаем паролем админа.
+app.post('/api/accounts/reset', checkAuth, async (req, res) => {
+    const b = req.body || {};
+    const username = accounts.clean(b.username);
+    const rec = accounts.get(accountsReg, username);
+    if (!rec) return res.status(404).json({ success: false, message: 'Учётная запись не найдена' });
+    const key = `acc-reset|${req.ip}`;
+    if (throttled(key)) return res.status(429).json({ success: false, message: 'Слишком много попыток, подождите' });
+    if (!(await confirmPassword(req, b.password))) {
+        bumpFail(key);
+        console.warn(`Отказ сброса пароля «${username}»: неверный пароль (${req.ip})`);
+        return res.status(403).json({ success: false, message: 'Неверный пароль' });
+    }
+    fails.delete(key);
+    // Пароль генерируем один раз и сразу хэшируем: в ответ уйдёт тот же текст, что лёг в хэш.
+    const newPassword = accounts.genTempPassword();
+    let passwordHash;
+    try { passwordHash = await auth.hashPassword(newPassword); }
+    catch (e) { console.error('Ошибка хэширования пароля:', e.message); return res.status(500).json({ success: false, message: 'Внутренняя ошибка' }); }
+    accountsReg = accounts.setTempPassword(accountsReg, username, passwordHash);
+    accounts.save(ACCOUNTS_FILE, accountsReg);
+    reloadAccounts();
+    console.log(`Сброс пароля учётной записи «${username}» (${req.ip}); выдан транспортный пароль, все её сессии отозваны`);
+    res.json({ success: true, account: publicAccount(accounts.get(accountsReg, username)), password: newPassword });
 });
 
 // Удалить локальную учётную запись. Тело: { username, password } — опасное действие,

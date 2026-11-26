@@ -50,7 +50,7 @@ const postJson = (port, p, cookie, body) => authed(port, p, cookie, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
 });
 
-test('учётные записи: создание, вход, запрет встроенного логина и короткого пароля', async () => {
+test('учётные записи: генерация пароля, обязательная смена при первом входе, запрет встроенного логина', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-acct-'));
     const port = portIn(7400, 60);
     const child = start(port, dir);
@@ -64,29 +64,83 @@ test('учётные записи: создание, вход, запрет вс
         assert.equal(list.builtin.username, 'admin');
         assert.deepEqual(list.accounts, []);
 
-        // создаём локальную учётную запись
-        const created = await postJson(port, '/api/accounts', admin.cookie, { username: 'Olga', password: 'olga-passphrase', displayName: 'Ольга', note: 'бухгалтер' });
+        // создаём локальную учётную запись — пароль генерирует сервер и отдаёт один раз
+        const created = await postJson(port, '/api/accounts', admin.cookie, { username: 'Olga', displayName: 'Ольга', note: 'бухгалтер' });
         assert.equal(created.status, 200);
         const cd = await created.json();
         assert.equal(cd.created, true);
+        assert.equal(cd.generated, true);
         assert.equal(cd.account.username, 'olga');           // логин нормализуется
+        assert.ok(typeof cd.password === 'string' && cd.password.length >= 10, 'транспортный пароль выдан');
 
-        // новый администратор реально входит
-        const olga = await login(port, 'olga', 'olga-passphrase');
+        // новый администратор входит выданным паролем, но сессия помечена как «сменить пароль»
+        const olga = await login(port, 'olga', cd.password);
         assert.equal(olga.status, 200);
-        assert.equal((await authed(port, '/api/me', olga.cookie)).status, 200);
+        let me = await (await authed(port, '/api/me', olga.cookie)).json();
+        assert.equal(me.mustChange, true);
+        // остальные разделы закрыты до смены пароля
+        const blocked = await authed(port, '/api/screens', olga.cookie);
+        assert.equal(blocked.status, 403);
+        assert.equal((await blocked.json()).code, 'password-change-required');
 
-        // список показывает запись, но не её пароль
+        // смена — без текущего пароля (он всё равно транспортный)
+        assert.equal((await postJson(port, '/api/me/password', olga.cookie, { newPassword: 'коротко' })).status, 400);
+        assert.equal((await postJson(port, '/api/me/password', olga.cookie, { newPassword: 'olga-passphrase' })).status, 200);
+        // теперь панель открыта
+        assert.equal((await authed(port, '/api/screens', olga.cookie)).status, 200);
+        // старый (транспортный) пароль больше не работает, новый — работает
+        assert.equal((await login(port, 'olga', cd.password)).status, 401);
+        const re = await login(port, 'olga', 'olga-passphrase');
+        assert.equal(re.status, 200);
+        assert.equal((await (await authed(port, '/api/me', re.cookie)).json()).mustChange, false);
+
+        // список показывает запись, но не её пароль; флаг смены снят
         list = await (await authed(port, '/api/accounts', admin.cookie)).json();
         assert.equal(list.accounts.length, 1);
         assert.ok(!('passwordHash' in list.accounts[0]), 'хэш пароля наружу не отдаём');
+        assert.equal(list.accounts[0].mustChange, false);
 
         // встроенную учётную запись завести нельзя
         assert.equal((await postJson(port, '/api/accounts', admin.cookie, { username: 'admin', password: 'another-passphrase' })).status, 400);
-        // короткий пароль — отказ
+        // короткий пароль (явно заданный админом) — отказ
         assert.equal((await postJson(port, '/api/accounts', admin.cookie, { username: 'petr', password: 'коротко' })).status, 400);
         // чужой пароль не пускает
         assert.equal((await login(port, 'olga', 'неверный-пароль-123')).status, 401);
+    } finally {
+        child.kill('SIGKILL');
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test('сброс пароля администратором: новый транспортный пароль, старый и сессии отозваны', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-acct-reset-'));
+    const port = portIn(7700, 40);
+    const child = start(port, dir);
+    try {
+        await mustStart(child, port);
+        const admin = await login(port, 'admin', ADMIN_PW);
+        await postJson(port, '/api/accounts', admin.cookie, { username: 'olga', password: 'olga-passphrase' });
+        // владелец входит и задаёт свой пароль
+        const first = await login(port, 'olga', 'olga-passphrase');
+        await postJson(port, '/api/me/password', first.cookie, { newPassword: 'olga-passphrase2' });
+        const own = await login(port, 'olga', 'olga-passphrase2');
+        assert.equal((await authed(port, '/api/me', own.cookie)).status, 200);
+
+        // сброс без верного пароля админа — отказ
+        assert.equal((await postJson(port, '/api/accounts/reset', admin.cookie, { username: 'olga', password: 'неверный' })).status, 403);
+        // сброс с верным паролем — выдаётся новый транспортный пароль
+        const reset = await postJson(port, '/api/accounts/reset', admin.cookie, { username: 'olga', password: ADMIN_PW });
+        assert.equal(reset.status, 200);
+        const rd = await reset.json();
+        assert.ok(typeof rd.password === 'string' && rd.password.length >= 10, 'выдан новый пароль');
+
+        // старая сессия владельца отозвана, старый пароль не работает
+        assert.equal((await authed(port, '/api/me', own.cookie)).status, 401);
+        assert.equal((await login(port, 'olga', 'olga-passphrase2')).status, 401);
+        // новый пароль работает и снова требует смены
+        const back = await login(port, 'olga', rd.password);
+        assert.equal(back.status, 200);
+        assert.equal((await (await authed(port, '/api/me', back.cookie)).json()).mustChange, true);
     } finally {
         child.kill('SIGKILL');
         fs.rmSync(dir, { recursive: true, force: true });
@@ -126,9 +180,11 @@ test('себя удалить нельзя: своя учётная запись
     try {
         await mustStart(child, port);
         const admin = await login(port, 'admin', ADMIN_PW);
-        await postJson(port, '/api/accounts', admin.cookie, { username: 'olga', password: 'olga-passphrase' });
-        const olga = await login(port, 'olga', 'olga-passphrase');
-        const r = await postJson(port, '/api/accounts/delete', olga.cookie, { username: 'olga', password: 'olga-passphrase' });
+        const made = await (await postJson(port, '/api/accounts', admin.cookie, { username: 'olga', password: 'olga-passphrase' })).json();
+        const olga = await login(port, 'olga', made.password || 'olga-passphrase');
+        // сначала задаём свой пароль (транспортный этого требует)
+        assert.equal((await postJson(port, '/api/me/password', olga.cookie, { newPassword: 'olga-own-passphrase' })).status, 200);
+        const r = await postJson(port, '/api/accounts/delete', olga.cookie, { username: 'olga', password: 'olga-own-passphrase' });
         assert.equal(r.status, 400, 'удалить себя из своей же сессии нельзя');
     } finally {
         child.kill('SIGKILL');

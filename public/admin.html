@@ -726,6 +726,7 @@ details.snapdet > summary { color: var(--accent); }
       </button>
       <div class="user-menu" id="userMenu" role="menu" hidden>
         <div class="who"><b id="userFull"></b><small id="userSource"></small></div>
+        <button class="item" role="menuitem" id="myPassMenuItem" hidden onclick="openMyPass()">Сменить пароль</button>
         <button class="item danger" role="menuitem" onclick="logout()">Выйти</button>
       </div>
     </div>
@@ -753,8 +754,9 @@ details.snapdet > summary { color: var(--accent); }
     <div id="paneLocal" role="tabpanel" aria-labelledby="tabLocal">
       <p style="font-size:12px;color:#777;margin:0 0 8px">
         Вход по логину и паролю, заведённым прямо здесь. Пароль хранится только в виде хэша —
-        восстановить его нельзя, можно лишь задать новый. Так заводят тех, у кого нет учётной
-        записи в каталоге: подрядчиков, гостей, сервисный/аварийный доступ.
+        восстановить его нельзя, можно лишь задать новый. Пароль, который вы сейчас выдадите,
+        будет <b>транспортным</b>: пользователь обязан сменить его при первом входе.
+        Так заводят тех, у кого нет учётной записи в каталоге: подрядчиков, гостей, сервисный/аварийный доступ.
       </p>
       <div id="acctList"><div class="snapinfo">Загрузка…</div></div>
 
@@ -764,10 +766,6 @@ details.snapdet > summary { color: var(--accent); }
           <input type="text" id="acctLogin" autocomplete="off" placeholder="например: contractor1" onkeydown="if(event.key==='Enter')saveAccount()">
         </div>
         <div class="fg">
-          <label for="acctPass">Пароль (от 10 символов)</label>
-          <input type="password" id="acctPass" autocomplete="new-password" placeholder="длинная фраза надёжнее" onkeydown="if(event.key==='Enter')saveAccount()">
-        </div>
-        <div class="fg">
           <label for="acctName">Имя (необязательно)</label>
           <input type="text" id="acctName" autocomplete="off" maxlength="80" placeholder="например: Иван Петров">
         </div>
@@ -775,7 +773,7 @@ details.snapdet > summary { color: var(--accent); }
           <label for="acctNote">Комментарий (необязательно)</label>
           <input type="text" id="acctNote" autocomplete="off" maxlength="120" placeholder="например: подрядчик, монтаж">
         </div>
-        <button class="btn success" id="acctAddBtn" onclick="saveAccount()">Создать локальную учётную запись</button>
+        <button class="btn success" id="acctAddBtn" onclick="saveAccount()">Создать и выдать пароль</button>
         <div class="snapinfo" id="acctMsg"></div>
       </div>
     </div>
@@ -924,6 +922,57 @@ details.snapdet > summary { color: var(--accent); }
     <button class="btn danger" id="userDelGo" onclick="userDelConfirm()">Убрать доступ</button>
     <button class="btn" onclick="closeUserDel()">Отмена</button>
     <div class="snapinfo" id="userDelMsg"></div>
+  </div>
+</div>
+
+<div class="modal" id="pwdShowModal" role="dialog" aria-modal="true" aria-labelledby="pwdShowTitle">
+  <div class="modal-content">
+    <h3 id="pwdShowTitle">Пароль выдан</h3>
+    <p style="font-size:13px;color:#555;margin:0 0 10px">
+      Логин: <b id="pwdShowUser"></b>. Передайте пароль владельцу любым удобным способом.
+      <b>Скопируйте его сейчас</b> — второй раз он не покажется (в системе хранится только хэш).
+      При первом входе система попросит сменить его на собственный.
+    </p>
+    <div class="fg"><label>Транспортный пароль</label>
+      <input type="text" id="pwdShowValue" readonly onclick="this.select()" style="font-family:ui-monospace,Menlo,Consolas,monospace"></div>
+    <button class="btn success" id="pwdShowCopy" onclick="copyShownPassword()">Скопировать пароль</button>
+    <button class="btn" onclick="closePwdShow()">Готово</button>
+    <div class="snapinfo">Запись сохранена. Закрытие окна не отменяет создание учётной записи.</div>
+  </div>
+</div>
+
+<div class="modal" id="acctResetModal" role="dialog" aria-modal="true" aria-labelledby="acctResetTitle">
+  <div class="modal-content">
+    <h3 id="acctResetTitle">Сбросить пароль?</h3>
+    <p style="font-size:13px;color:#555;margin:0 0 10px">Логин: <b id="acctResetName"></b></p>
+    <p style="font-size:13px;color:#555;margin:0 0 10px">
+      Старый пароль перестанет работать, все активные сессии этой учётной записи завершатся,
+      а новый пароль будет <b>транспортным</b> — владелец сменит его при первом входе.
+      Так делают, если старый пароль мог утечь: пароль не привязан ни к почте, ни к телефону.
+    </p>
+    <div class="fg"><label>Ваш пароль</label>
+      <input type="password" id="acctResetPass" autocomplete="current-password" placeholder="Введите пароль" onkeydown="if(event.key==='Enter')acctResetConfirm()"></div>
+    <button class="btn" id="acctResetGo" onclick="acctResetConfirm()">Сбросить и выдать новый</button>
+    <button class="btn" onclick="closeAcctReset()">Отмена</button>
+    <div class="snapinfo" id="acctResetMsg"></div>
+  </div>
+</div>
+
+<div class="modal" id="myPassModal" role="dialog" aria-modal="true" aria-labelledby="myPassTitle">
+  <div class="modal-content">
+    <h3 id="myPassTitle">Смена пароля</h3>
+    <p style="font-size:13px;color:#555;margin:0 0 10px" id="myPassHint">
+      Пароль, выданный администратором, меняется при первом входе. Новый пароль — только ваш;
+      после смены все прочие ваши сессии завершатся.
+    </p>
+    <div class="fg" id="myPassCurWrap"><label for="myPassCur">Текущий пароль</label>
+      <input type="password" id="myPassCur" autocomplete="current-password" placeholder="Введите пароль"></div>
+    <div class="fg"><label for="myPassNew">Новый пароль (от 10 символов)</label>
+      <input type="password" id="myPassNew" autocomplete="new-password" placeholder="длинная фраза надёжнее"></div>
+    <div class="fg"><label for="myPassNew2">Повторите новый пароль</label>
+      <input type="password" id="myPassNew2" autocomplete="new-password" placeholder="ещё раз" onkeydown="if(event.key==='Enter')submitMyPass()"></div>
+    <button class="btn success" id="myPassGo" onclick="submitMyPass()">Сменить пароль</button>
+    <div class="snapinfo" id="myPassMsg"></div>
   </div>
 </div>
 
@@ -1560,7 +1609,13 @@ function paintUser(u) {
   $('userFull').textContent = name || 'Пользователь';
   $('userAvatar').textContent = (name.trim()[0] || 'А').toUpperCase();
   $('userSource').textContent = u && u.via === 'freeipa' ? 'FreeIPA' : 'Локальная учётка';
+  // «Сменить пароль» — только для локальных учёток из панели (пароль домена — в каталоге,
+  // встроенной учётки — в .env).
+  if ($('myPassMenuItem')) $('myPassMenuItem').hidden = !(u && u.via === 'account');
   box.hidden = false;
+  // Транспортный пароль: не показываем панель, а сразу просим выбрать свой.
+  if (u && u.mustChange) { openMyPass(true); return; }
+  startApp();
 }
 (function initUserMenu() {
   document.addEventListener('click', e => {
@@ -1576,7 +1631,6 @@ function paintUser(u) {
     paintUser(null);
   })();
 })();
-
 // ---------- панели «Пользователи», «Сессии», «Настройки» ----------
 // Ролей нет: любой, кто может войти, — равноправный администратор, и все три панели ему доступны.
 // Вход в саму админку и есть «права администратора» — отдельный признак админа не нужен.
@@ -1661,12 +1715,15 @@ async function loadAccounts() {
       </div>`);
   }
   for (const a of (d.accounts || [])) {
+    const waitChg = a.mustChange ? `<div style="font-size:12px;color:#c0392b">ждёт смены транспортного пароля при первом входе</div>` : '';
     rows.push(`
       <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #eef1f5">
         <div style="flex:1;min-width:0"><b>${esc(a.username)}</b>${a.displayName ? ` <span style="color:#555">— ${esc(a.displayName)}</span>` : ''}
           ${a.note ? `<div style="font-size:12px;color:#777">${esc(a.note)}</div>` : ''}
           <div style="font-size:12px;color:#999">создана${a.createdAt ? ' ' + esc(fmtDate(a.createdAt)) : ''}${a.createdBy ? ' · ' + esc(a.createdBy) : ''}</div>
+          ${waitChg}
         </div>
+        <button class="btn" style="flex:none" onclick="askAcctReset('${esc(a.username)}')">Сбросить пароль</button>
         <button class="btn danger" style="flex:none" onclick="askAcctDel('${esc(a.username)}')">Удалить</button>
       </div>`);
   }
@@ -1675,26 +1732,66 @@ async function loadAccounts() {
 
 async function saveAccount() {
   const login = ($('acctLogin').value || '').trim();
-  const pass = $('acctPass').value || '';
   const btn = $('acctAddBtn');
   if (!login) { toast('Укажите логин', 'error'); return; }
-  if (!pass) { toast('Укажите пароль', 'error'); return; }
   btn.disabled = true; $('acctMsg').textContent = 'Сохраняю…';
   try {
+    // Пароль генерирует сервер — админ его не придумывает и не хранит.
     const r = await fetch('/api/accounts', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: login, password: pass, displayName: ($('acctName').value || '').trim(), note: ($('acctNote').value || '').trim() })
+      body: JSON.stringify({ username: login, displayName: ($('acctName').value || '').trim(), note: ($('acctNote').value || '').trim() })
     });
     const d = await r.json();
     if (r.status === 401) { location.reload(); return; }
     if (!d.success) { $('acctMsg').textContent = ''; toast(d.message || 'Не удалось сохранить', 'error'); return; }
-    $('acctLogin').value = ''; $('acctPass').value = ''; $('acctName').value = ''; $('acctNote').value = ''; $('acctMsg').textContent = '';
-    toast(d.created ? 'Учётная запись создана: ' + login : 'Пароль обновлён: ' + login);
+    $('acctLogin').value = ''; $('acctName').value = ''; $('acctNote').value = ''; $('acctMsg').textContent = '';
     await loadAccounts();
+    if (d.password) showIssuedPassword(d.account && d.account.username || login, d.password);
+    else toast(d.created ? 'Учётная запись создана: ' + login : 'Пароль обновлён: ' + login);
     $('acctLogin').focus();
   } catch {
     $('acctMsg').textContent = ''; toast('Ошибка сети', 'error');
   } finally { btn.disabled = false; }
+}
+
+// Показ выданного транспортного пароля — единственный раз. В системе лежит лишь хэш.
+function showIssuedPassword(username, password) {
+  $('pwdShowUser').textContent = username;
+  $('pwdShowValue').value = password;
+  $('pwdShowModal').style.display = 'flex';
+  $('pwdShowValue').focus(); $('pwdShowValue').select();
+}
+function closePwdShow() { $('pwdShowValue').value = ''; $('pwdShowModal').style.display = 'none'; }
+async function copyShownPassword() {
+  const v = $('pwdShowValue').value;
+  if (!v) return;
+  try { await navigator.clipboard.writeText(v); }
+  catch { $('pwdShowValue').select(); document.execCommand('copy'); }
+  toast('Пароль скопирован — передайте его владельцу');
+}
+
+// ---------- сброс пароля учётной записи (опасное действие) ----------
+let acctResetName = null;
+function askAcctReset(name) { acctResetName = name; $('acctResetName').textContent = name; $('acctResetPass').value = ''; $('acctResetMsg').textContent = ''; $('acctResetModal').style.display = 'flex'; $('acctResetPass').focus(); }
+function closeAcctReset() { $('acctResetModal').style.display = 'none'; acctResetName = null; }
+async function acctResetConfirm() {
+  if (!acctResetName) return;
+  const go = $('acctResetGo'); go.disabled = true;
+  try {
+    const r = await fetch('/api/accounts/reset', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: acctResetName, password: $('acctResetPass').value })
+    });
+    const d = await r.json();
+    if (r.status === 401) { location.reload(); return; }
+    if (!d.success) { $('acctResetMsg').textContent = d.message || 'Не удалось сбросить'; return; }
+    const name = acctResetName;
+    closeAcctReset();
+    await loadAccounts();
+    if (d.password) showIssuedPassword(name, d.password);
+    else toast('Пароль сброшен: ' + name);
+  } catch { $('acctResetMsg').textContent = 'Ошибка сети'; }
+  finally { go.disabled = false; }
 }
 
 function askAcctDel(name) { acctDelName = name; $('acctDelName').textContent = name; $('acctDelPass').value = ''; $('acctDelMsg').textContent = ''; $('acctDelModal').style.display = 'flex'; $('acctDelPass').focus(); }
@@ -1714,6 +1811,44 @@ async function acctDelConfirm() {
     closeAcctDel();
     await loadAccounts();
   } catch { $('acctDelMsg').textContent = 'Ошибка сети'; }
+  finally { go.disabled = false; }
+}
+
+// ---------- смена пароля самим пользователем (в т.ч. обязательная при первом входе) ----------
+let myPassForced = false;      // true — сессия ограничена сменой пароля
+function openMyPass(forced = false) {
+  myPassForced = !!forced;
+  $('myPassCurWrap').hidden = myPassForced;             // при транспортном пароле текущий не спрашиваем
+  $('myPassHint').textContent = myPassForced
+    ? 'Вы вошли с транспортным паролем, выданным администратором. Задайте собственный — после этого откроется панель. Прочие ваши сессии завершатся.'
+    : 'Новый пароль — только ваш; после смены все прочие ваши сессии завершатся.';
+  $('myPassCur').value = ''; $('myPassNew').value = ''; $('myPassNew2').value = ''; $('myPassMsg').textContent = '';
+  $('myPassModal').style.display = 'flex';
+  ($('myPassNew')).focus();
+}
+function closeMyPass() { $('myPassModal').style.display = 'none'; }
+async function submitMyPass() {
+  const cur = $('myPassCur').value, nw = $('myPassNew').value, nw2 = $('myPassNew2').value;
+  const go = $('myPassGo'), msg = $('myPassMsg');
+  if (!myPassForced && !cur) { msg.textContent = 'Введите текущий пароль'; return; }
+  if (nw.length < 10) { msg.textContent = 'Новый пароль — минимум 10 символов'; return; }
+  if (nw !== nw2) { msg.textContent = 'Новые пароли не совпадают'; return; }
+  go.disabled = true; msg.textContent = 'Сохраняю…';
+  try {
+    const r = await fetch('/api/me/password', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPassword: cur, newPassword: nw })
+    });
+    const d = await r.json();
+    if (r.status === 401) { location.reload(); return; }
+    if (!d.success) { msg.textContent = d.message || 'Не удалось сменить пароль'; return; }
+    msg.textContent = '';
+    closeMyPass();
+    myPassForced = false;
+    $('myPassMenuItem').hidden = false;
+    toast('Пароль сменён. Другие ваши сессии завершены.');
+    if (typeof location !== 'undefined') location.reload();     // подтянуть панель без транспортного ограничения
+  } catch { msg.textContent = 'Ошибка сети'; }
   finally { go.disabled = false; }
 }
 
@@ -1948,6 +2083,9 @@ const MODALS = [
   { id: 'settingsModal', close: () => closeSettings() },
   { id: 'userDelModal', close: () => closeUserDel() },
   { id: 'acctDelModal', close: () => closeAcctDel() },
+  { id: 'acctResetModal', close: () => closeAcctReset() },
+  { id: 'pwdShowModal', close: () => closePwdShow() },
+  { id: 'myPassModal', close: () => closeMyPass() },
   { id: 'sessDelModal', close: () => closeSessDel() },
   { id: 'modal', close: () => closeModal() }
 ];
@@ -2164,7 +2302,12 @@ async function delSnap(i, f) {
   loadSnaps(i);
 }
 
-(async () => {
+// Запуск панели. Вызывается, когда известно, что сессия не ограничена сменой пароля
+// (см. paintUser): иначе панель работала бы с 403 на каждом запросе.
+let appStarted = false;
+async function startApp() {
+  if (appStarted) return;
+  appStarted = true;
   await loadScreens();
   build();
   await load();
@@ -2183,7 +2326,7 @@ async function delSnap(i, f) {
     loadStatus();
     load();
   });
-})();
+}
 </script>
 
 <div id="toast-root" aria-live="polite" style="position:fixed;right:16px;bottom:16px;z-index:100;display:flex;flex-direction:column;gap:8px;max-width:420px"></div>

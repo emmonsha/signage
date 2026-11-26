@@ -71,3 +71,26 @@ test('записанный хэш действительно проверяет 
     assert.equal(await auth.verifyPassword('правильный-пароль', h), true);
     assert.equal(await auth.verifyPassword('другой-пароль', h), false);
 });
+
+test('genTempPassword: длинный пароль без похожих символов, каждый раз новый', () => {
+    const a = accounts.genTempPassword(), b = accounts.genTempPassword();
+    assert.ok(a.length >= 16, 'транспортный пароль должен быть длинным: ' + a.length);
+    assert.equal(a, a.trim());
+    assert.doesNotMatch(a, /[^A-Za-z0-9]/, 'только буквы и цифры — легко продиктовать по телефону');
+    for (const ch of '0O1lI') assert.ok(!a.includes(ch), `символа «${ch}» быть не должно (легко перепутать)`);
+    assert.notEqual(a, b, 'два подряд пароля не совпадают');
+    assert.equal(accounts.genTempPassword(4).length, 4, 'размер задаётся');
+});
+
+test('setTempPassword: поднимает флаг mustChange и меняет хэш', async () => {
+    const h1 = await auth.hashPassword('transport-passphrase');
+    const h2 = await auth.hashPassword('own-passphrase-2');
+    let reg = accounts.normalize({ accounts: [{ username: 'ivanov', passwordHash: h1 }] });
+    assert.equal(accounts.get(reg, 'ivanov').mustChange, false, 'старая запись не требует смены');
+    reg = accounts.setTempPassword(reg, 'ivanov', h2);
+    const rec = accounts.get(reg, 'ivanov');
+    assert.equal(rec.mustChange, true);
+    assert.equal(await auth.verifyPassword('own-passphrase-2', rec.passwordHash), true);
+    // неизвестный логин — реестр не меняется
+    assert.deepEqual(accounts.setTempPassword(reg, 'нет', h2).accounts.length, 1);
+});
