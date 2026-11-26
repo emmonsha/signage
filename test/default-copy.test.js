@@ -40,7 +40,7 @@ const PNG = Buffer.from(
 
 test('галочка «на всех экранах» после загрузки: заглушка копируется на все экраны', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-def-'));
-    const port = 4700 + Math.floor(Math.random() * 200);
+    const port = 4500 + Math.floor(Math.random() * 120);
     const child = start(port, dir);
     try {
         assert.ok(await waitHealth(port), 'сервер не поднялся');
@@ -85,7 +85,7 @@ test('галочка «на всех экранах» после загрузк�
 
 test('copy: без заглушки на экране -> 400 с понятным текстом', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-def2-'));
-    const port = 4900 + Math.floor(Math.random() * 90);
+    const port = 4650 + Math.floor(Math.random() * 90);
     const child = start(port, dir);
     try {
         assert.ok(await waitHealth(port), 'сервер не поднялся');
@@ -104,7 +104,7 @@ test('copy: без заглушки на экране -> 400 с понятным
 
 test('copy: без авторизации -> 401', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-def3-'));
-    const port = 5000 + Math.floor(Math.random() * 90);
+    const port = 4780 + Math.floor(Math.random() * 90);
     const child = start(port, dir);
     try {
         assert.ok(await waitHealth(port), 'сервер не поднялся');

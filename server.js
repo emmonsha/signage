@@ -418,10 +418,14 @@ function renderLogin() {
     const file = path.join(PUBLIC, 'login.html');
     const hint = AUTH_MODE === 'freeipa' ? 'Вход по учётной записи FreeIPA'
         : AUTH_MODE === 'both' ? 'FreeIPA или локальный администратор' : '';
+    // Поле логина показываем всегда. В local-режиме учётка одна — подставляем ADMIN_USER,
+    // в freeipa/both логин вводит пользователь (поле пустое).
+    const user = LOCAL_LOGIN && AUTH_MODE === 'local' ? ADMIN_USER : '';
     try {
         return fs.readFileSync(file, 'utf8')
             .replace('__AUTH_MODE__', AUTH_MODE)
-            .replace('__AUTH_HINT__', hint);
+            .replace('__AUTH_HINT__', hint)
+            .replace('__AUTH_USER__', user);
     } catch {
         return fs.readFileSync(file);   // на всякий случай отдаём файл как есть
     }

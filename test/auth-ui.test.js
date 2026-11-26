@@ -1,4 +1,4 @@
-// Защита от двух регрессий, найденных Хозяином 2026-11-26:
+// Защита от двух регрессий, найденных при приёмке 2026-11-26:
 //   1) на странице входа не было поля логина при входе через FreeIPA
 //      (в login.html был битый CSS: осиротевший ` ========== -->` + второй <style> — из-за
 //      этого блок :root отбрасывался браузером и форма теряла оформление);
@@ -41,6 +41,9 @@ test('login.html: один <style>, нет осиротевшего фрагме
     assert.doesNotMatch(html, /^\s*=+\s*-->\s*$/m, 'битый фрагмент комментария ломает разбор CSS');
     assert.match(html, /__AUTH_MODE__/, 'режим входа подставляет сервер');
     assert.match(html, /__AUTH_HINT__/, 'подсказку подставляет сервер');
+    assert.match(html, /__AUTH_USER__/, 'логин подставляет сервер');
+    // Поле логина показываем всегда (нет правила, скрывающего #user).
+    assert.doesNotMatch(html, /#user\s*\{[^}]*display:\s*none/, 'поле логина не должно скрываться');
 });
 
 test('admin.html: значок пользователя и выпадающее меню выхода присутствуют', () => {
@@ -53,51 +56,47 @@ test('admin.html: значок пользователя и выпадающее 
 
 // ---- поведение сервера ----
 
-test('страница входа отрисовывается по AUTH_MODE: поле логина при FreeIPA', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-authui-'));
-    const port = 4700 + Math.floor(Math.random() * 90);
-    const child = start(port, dir, {
+test('поле логина показывается всегда: при FreeIPA пустое, в local предзаполнено', async () => {
+    // both/freeipa: поле есть, но логин вводит пользователь -> пустое
+    const dir1 = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-authui-'));
+    const port1 = 4200 + Math.floor(Math.random() * 90);
+    const child1 = start(port1, dir1, {
         AUTH_MODE: 'both', FREEIPA_ENABLED: 'true', FREEIPA_URL: 'ldaps://ipa.invalid:636',
         FREEIPA_BASE_DN: 'dc=example,dc=com',
         FREEIPA_BIND_DN: 'uid=b,cn=users,cn=accounts,dc=example,dc=com', FREEIPA_BIND_PASSWORD: 'x'
     });
     try {
-        assert.ok(await waitHealth(port), 'сервер не поднялся');
-        const html = await (await fetch(`http://127.0.0.1:${port}/admin`)).text();
+        assert.ok(await waitHealth(port1), 'сервер не поднялся');
+        const html = await (await fetch(`http://127.0.0.1:${port1}/admin`)).text();
         assert.match(html, /data-auth-mode="both"/, 'режим должен попасть в разметку');
-        assert.match(html, /id="user"/, 'в форме должно быть поле логина');
-        // Поле показывается правилом CSS (селектор), а не только скриптом.
-        assert.match(html, /body\[data-auth-mode="freeipa"\] #user[\s\S]*body\[data-auth-mode="both"\] #user/,
-            'поле логина должно раскрываться по режиму без JS');
-        const a = await (await fetch(`http://127.0.0.1:${port}/api/auth`)).json();
+        assert.match(html, /id="user"[^>]*value=""/, 'при FreeIPA поле логина показываем пустым');
+        const a = await (await fetch(`http://127.0.0.1:${port1}/api/auth`)).json();
         assert.equal(a.username, true);
     } finally {
-        child.kill('SIGKILL');
-        fs.rmSync(dir, { recursive: true, force: true });
+        child1.kill('SIGKILL');
+        fs.rmSync(dir1, { recursive: true, force: true });
     }
-});
 
-test('страница входа доступна по /login и не показывает логин в local-режиме', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-authui2-'));
-    const port = 4800 + Math.floor(Math.random() * 90);
-    const child = start(port, dir, { AUTH_MODE: 'local', FREEIPA_ENABLED: 'false' });
+    // local: учётка одна — поле показано и предзаполнено ADMIN_USER
+    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-authui2-'));
+    const port2 = 4300 + Math.floor(Math.random() * 90);
+    const child2 = start(port2, dir2, { AUTH_MODE: 'local', FREEIPA_ENABLED: 'false', ADMIN_USER: 'admin' });
     try {
-        assert.ok(await waitHealth(port), 'сервер не поднялся');
-        const r = await fetch(`http://127.0.0.1:${port}/login`);
+        assert.ok(await waitHealth(port2), 'сервер не поднялся');
+        const r = await fetch(`http://127.0.0.1:${port2}/login`);
         assert.equal(r.status, 200, '/login должен отдавать форму входа, а не Cannot GET');
         const html = await r.text();
         assert.match(html, /data-auth-mode="local"/);
-        assert.doesNotMatch(html, /body\[data-auth-mode="local"\]\s*#user\s*\{[^}]*display:\s*(block|inline)/,
-            'в local-режиме поле логина не показываем');
+        assert.match(html, /id="user"[^>]*value="admin"/, 'в local поле логина видно и предзаполнено');
     } finally {
-        child.kill('SIGKILL');
-        fs.rmSync(dir, { recursive: true, force: true });
+        child2.kill('SIGKILL');
+        fs.rmSync(dir2, { recursive: true, force: true });
     }
 });
 
 test('/api/me: 401 без входа и данные пользователя после входа', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-authui3-'));
-    const port = 4900 + Math.floor(Math.random() * 90);
+    const port = 4400 + Math.floor(Math.random() * 90);
     const child = start(port, dir, { AUTH_MODE: 'local' });
     try {
         assert.ok(await waitHealth(port), 'сервер не поднялся');

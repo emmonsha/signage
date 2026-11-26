@@ -39,7 +39,7 @@ const login = async (port) => {
 
 test('сессия админки переживает перезапуск сервера', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-sess-'));
-    const port = 4200 + Math.floor(Math.random() * 200);
+    const port = 5200 + Math.floor(Math.random() * 150);
     let child = start(port, dir);
     try {
         assert.ok(await waitHealth(port), 'сервер не поднялся');
@@ -70,7 +70,7 @@ test('сессия админки переживает перезапуск се
 
 test('без cookie админка отдаёт логин (не 500)', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-sess2-'));
-    const port = 4400 + Math.floor(Math.random() * 200);
+    const port = 5400 + Math.floor(Math.random() * 150);
     const child = start(port, dir);
     try {
         assert.ok(await waitHealth(port), 'сервер не поднялся');
@@ -87,7 +87,7 @@ test('без cookie админка отдаёт логин (не 500)', async ()
 
 test('файлы сессий и секрет лежат на томе (переживут смену контейнера)', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-sess3-'));
-    const port = 4600 + Math.floor(Math.random() * 200);
+    const port = 5600 + Math.floor(Math.random() * 150);
     const child = start(port, dir);
     try {
         assert.ok(await waitHealth(port), 'сервер не поднялся');
