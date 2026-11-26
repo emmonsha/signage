@@ -138,6 +138,10 @@ ADMIN_PASSWORD_HASH=<scrypt-хэш>     # npm run hash-password
 
 FREEIPA_ENABLED=true
 FREEIPA_URL=ldaps://ipa.example.com:636
+# Либо — адрес по частям (удобно при нестандартных портах); FREEIPA_URL приоритетнее:
+# FREEIPA_HOST=ipa.example.com
+# FREEIPA_SCHEME=ldaps              # ldap | ldaps (порт 389 → ldap, иначе ldaps)
+# FREEIPA_PORT=1636                 # пусто → 636 для ldaps, 389 для ldap
 FREEIPA_BASE_DN=dc=example,dc=com
 FREEIPA_USER_BASE_DN=cn=users,cn=accounts,dc=example,dc=com
 FREEIPA_BIND_DN=uid=signage-bind,cn=users,cn=accounts,dc=example,dc=com
