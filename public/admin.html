@@ -668,6 +668,18 @@ input::placeholder { color: var(--text-disabled); }
   box-shadow: var(--shadow-2);
 }
 .modal-content h3 { margin: 0 0 var(--sp-3); font-size: var(--fs-l); font-weight: 650; }
+/* ---------- Подразделы (вкладки) в панели «Пользователи» ---------- */
+.tabs { display: flex; gap: var(--sp-1); border-bottom: 2px solid var(--border); margin: 0 0 var(--sp-3); }
+.tab {
+  appearance: none; background: none; border: none; border-bottom: 2px solid transparent;
+  margin-bottom: -2px; padding: var(--sp-2) var(--sp-3); cursor: pointer;
+  font: inherit; font-size: var(--fs-m); color: var(--text-secondary); border-radius: var(--radius-s) var(--radius-s) 0 0;
+}
+.tab:hover { background: var(--bg-hover, #f1f3f5); }
+.tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 650; }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tab .cnt { font-size: var(--fs-xs); color: var(--text-muted); margin-left: 4px; }
+.tab[aria-selected="true"] .cnt { color: var(--accent); }
 .fg { margin-bottom: var(--sp-3); }
 .fg label { display: block; font-size: var(--fs-s); font-weight: 600; margin-bottom: var(--sp-1); }
 .fg input { width: 100%; }
@@ -733,41 +745,46 @@ details.snapdet > summary { color: var(--accent); }
       Кто может войти в панель. Все учётные записи — равноправные администраторы (ролей нет).
     </p>
 
-    <h4 style="margin:0 0 6px;font-size:var(--fs-m)">Учётные записи</h4>
-    <p style="font-size:12px;color:#777;margin:0 0 8px">
-      Логин и пароль, заведённые прямо здесь. Пароль хранится только в виде хэша — восстановить
-      его нельзя, можно лишь задать новый. Встроенную учётную запись (в .env) удалить отсюда нельзя:
-      это аварийный вход.
-    </p>
-    <div id="acctList"><div class="snapinfo">Загрузка…</div></div>
-
-    <div style="margin-top:14px;padding-top:12px;border-top:1px solid #eef1f5">
-      <div class="fg">
-        <label for="acctLogin">Логин</label>
-        <input type="text" id="acctLogin" autocomplete="off" placeholder="например: ivanov" onkeydown="if(event.key==='Enter')saveAccount()">
-      </div>
-      <div class="fg">
-        <label for="acctPass">Пароль (от 10 символов)</label>
-        <input type="password" id="acctPass" autocomplete="new-password" placeholder="длинная фраза надёжнее" onkeydown="if(event.key==='Enter')saveAccount()">
-      </div>
-      <div class="fg">
-        <label for="acctName">Имя (необязательно)</label>
-        <input type="text" id="acctName" autocomplete="off" maxlength="80" placeholder="например: Иван Петров">
-      </div>
-      <div class="fg">
-        <label for="acctNote">Комментарий (необязательно)</label>
-        <input type="text" id="acctNote" autocomplete="off" maxlength="120" placeholder="например: инженер, 3 этаж">
-      </div>
-      <button class="btn success" id="acctAddBtn" onclick="saveAccount()">Создать учётную запись</button>
-      <div class="snapinfo" id="acctMsg"></div>
+    <div class="tabs" role="tablist" aria-label="Подразделы пользователей">
+      <button class="tab" id="tabLocal" role="tab" aria-selected="true" aria-controls="paneLocal" onclick="switchUsersTab('local')">🔑 Локальные <span class="cnt" id="tabLocalCnt"></span></button>
+      <button class="tab" id="tabDomain" role="tab" aria-selected="false" aria-controls="paneDomain" onclick="switchUsersTab('domain')">🏢 Доменные (FreeIPA) <span class="cnt" id="tabDomainCnt"></span></button>
     </div>
 
-    <div id="accessSection" style="margin-top:16px;padding-top:12px;border-top:1px solid #eef1f5">
-      <h4 style="margin:0 0 6px;font-size:var(--fs-m)">Допущенные из каталога</h4>
+    <div id="paneLocal" role="tabpanel" aria-labelledby="tabLocal">
       <p style="font-size:12px;color:#777;margin:0 0 8px">
-        Вход по доменной учётной записи через FreeIPA. Список решает, кого пускать: пока он не пуст,
-        остальные сотрудники каталога войти не смогут. Пароли здесь не хранятся — пароль
-        по-прежнему проверяется в каталоге.
+        Вход по логину и паролю, заведённым прямо здесь. Пароль хранится только в виде хэша —
+        восстановить его нельзя, можно лишь задать новый. Так заводят тех, у кого нет учётной
+        записи в каталоге: подрядчиков, гостей, сервисный/аварийный доступ.
+      </p>
+      <div id="acctList"><div class="snapinfo">Загрузка…</div></div>
+
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid #eef1f5">
+        <div class="fg">
+          <label for="acctLogin">Логин</label>
+          <input type="text" id="acctLogin" autocomplete="off" placeholder="например: contractor1" onkeydown="if(event.key==='Enter')saveAccount()">
+        </div>
+        <div class="fg">
+          <label for="acctPass">Пароль (от 10 символов)</label>
+          <input type="password" id="acctPass" autocomplete="new-password" placeholder="длинная фраза надёжнее" onkeydown="if(event.key==='Enter')saveAccount()">
+        </div>
+        <div class="fg">
+          <label for="acctName">Имя (необязательно)</label>
+          <input type="text" id="acctName" autocomplete="off" maxlength="80" placeholder="например: Иван Петров">
+        </div>
+        <div class="fg">
+          <label for="acctNote">Комментарий (необязательно)</label>
+          <input type="text" id="acctNote" autocomplete="off" maxlength="120" placeholder="например: подрядчик, монтаж">
+        </div>
+        <button class="btn success" id="acctAddBtn" onclick="saveAccount()">Создать локальную учётную запись</button>
+        <div class="snapinfo" id="acctMsg"></div>
+      </div>
+    </div>
+
+    <div id="paneDomain" role="tabpanel" aria-labelledby="tabDomain" hidden>
+      <p style="font-size:12px;color:#777;margin:0 0 8px">
+        Вход по доменной учётной записи через FreeIPA. Пароль здесь НЕ задаётся и не хранится —
+        он проверяется в самом каталоге. Пока список не пуст, остальные сотрудники каталога войти
+        не смогут.
       </p>
       <div class="snapinfo" id="accessModeInfo" style="margin-bottom:10px"></div>
       <div id="accessList"></div>
@@ -779,8 +796,15 @@ details.snapdet > summary { color: var(--accent); }
         <label for="accessNote">Комментарий (необязательно)</label>
         <input type="text" id="accessNote" autocomplete="off" maxlength="120" placeholder="например: инженер, 3 этаж">
       </div>
-      <button class="btn success" id="accessAddBtn" onclick="addUser()">Добавить</button>
+      <button class="btn success" id="accessAddBtn" onclick="addUser()">Добавить из каталога</button>
       <div class="snapinfo" id="accessMsg"></div>
+    </div>
+
+    <div id="usersCatalogOff" hidden style="margin-top:6px">
+      <div class="snapinfo">
+        Вход через каталог FreeIPA не включён. Доменные учётные записи появятся здесь, когда
+        каталог будет настроен — в панели «⚙️ Настройки».
+      </div>
     </div>
 
     <div style="margin-top:16px"><button class="btn" onclick="closeUsers()">Закрыть</button></div>
@@ -1557,8 +1581,10 @@ function paintUser(u) {
 // Ролей нет: любой, кто может войти, — равноправный администратор, и все три панели ему доступны.
 // Вход в саму админку и есть «права администратора» — отдельный признак админа не нужен.
 let accessState = null, userDelName = null, sessDelId = null, acctDelName = null;
+let usersCatalog = false;      // включён ли вход через каталог (виден ли подраздел «Доменные»)
+let usersTab = 'local';        // активный подраздел панели «Пользователи»
 
-// Показать кнопки панелей после проверки авторизации и решить, нужен ли раздел каталога.
+// Показать кнопки панелей после проверки авторизации и решить, нужен ли подраздел каталога.
 async function initUsers() {
   let d;
   try {
@@ -1567,10 +1593,35 @@ async function initUsers() {
     if (r.ok) d = await r.json();
     else d = null;
   } catch { return; }                                   // сеть/сервер — без кнопок
-  if (!d || !d.catalog) $('accessSection').hidden = true;   // каталог не настроен: раздел допущенных скрыт
+  usersCatalog = !!(d && d.catalog);                    // каталог не настроен -> подраздел доменных скрыт
   $('usersBtn').hidden = false;
   $('sessionsBtn').hidden = false;
   $('settingsBtn').hidden = false;
+  // Если активный подраздел «доменные», а каталога нет — вернёмся на локальные.
+  if (!usersCatalog && usersTab === 'domain') switchUsersTab('local');
+  else applyUsersTab();
+}
+
+// Переключение подразделов панели «Пользователи»: локальные учётные записи / доменные (FreeIPA).
+function applyUsersTab() {
+  const domain = usersTab === 'domain' && usersCatalog;
+  const tabDomain = $('tabDomain'), tabLocal = $('tabLocal');
+  if (tabDomain) tabDomain.hidden = !usersCatalog;      // без каталога подраздел просто не показываем
+  if (tabLocal) tabLocal.setAttribute('aria-selected', String(!domain));
+  if (tabDomain) tabDomain.setAttribute('aria-selected', String(domain));
+  $('paneLocal').hidden = domain;
+  $('paneDomain').hidden = !domain;
+  if ($('usersCatalogOff')) $('usersCatalogOff').hidden = usersCatalog;
+  localStorage.setItem('signage-users-tab', usersTab);
+  const f = $(domain ? 'accessLogin' : 'acctLogin');
+  if (f && $('usersModal').style.display === 'flex') f.focus();
+}
+
+function switchUsersTab(tab) {
+  usersTab = tab === 'domain' ? 'domain' : 'local';
+  applyUsersTab();
+  if (usersTab === 'domain' && usersCatalog) loadUsers();
+  if (usersTab === 'local') loadAccounts();
 }
 
 function accessModeText(info) {
@@ -1582,9 +1633,12 @@ function accessModeText(info) {
 async function openUsers() {
   $('usersModal').style.display = 'flex';
   $('acctMsg').textContent = ''; $('accessMsg').textContent = '';
+  // Помним выбранный подраздел между открытиями; без каталога всегда локальные.
+  const saved = localStorage.getItem('signage-users-tab');
+  usersTab = (saved === 'domain' && usersCatalog) ? 'domain' : 'local';
+  applyUsersTab();
   await loadAccounts();
-  if (!$('accessSection').hidden) { await loadUsers(); const f = $('accessLogin'); if (f) f.focus(); }
-  else { const f = $('acctLogin'); if (f) f.focus(); }
+  if (usersCatalog) await loadUsers();
 }
 function closeUsers() { $('usersModal').style.display = 'none'; }
 
@@ -1595,6 +1649,7 @@ async function loadAccounts() {
   const box = $('acctList');
   let d;
   try { d = await api('/api/accounts'); } catch { box.innerHTML = '<div class="snapinfo">Не удалось получить список.</div>'; return; }
+  if ($('tabLocalCnt')) $('tabLocalCnt').textContent = (d.accounts || []).length ? `(${(d.accounts || []).length})` : '';
   const rows = [];
   if (d.builtin) {
     rows.push(`
@@ -1704,6 +1759,7 @@ async function loadUsers() {
   try { d = await api('/api/users'); } catch { return; }
   accessState = d;
   $('accessModeInfo').textContent = accessModeText(d);
+  if ($('tabDomainCnt')) $('tabDomainCnt').textContent = (d.users || []).length ? `(${(d.users || []).length})` : '';
   const box = $('accessList');
   if (!d.users || !d.users.length) {
     box.innerHTML = '<div class="snapinfo" style="padding:10px 0">Список пуст.</div>';
