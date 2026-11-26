@@ -17,7 +17,7 @@ const USERS = JSON.stringify({ alice: 'good-alice', bob: 'good-bob' });
 const DISPLAY = JSON.stringify({ alice: 'Алиса', bob: 'Борис' });
 
 function start(port, dir, extra = {}) {
-    return spawn(process.execPath, [HELPER], {
+    const child = spawn(process.execPath, [HELPER], {
         cwd: ROOT,
         env: {
             ...process.env, PORT: String(port), STORAGE_DIR: dir, NODE_ENV: 'test',
@@ -25,11 +25,26 @@ function start(port, dir, extra = {}) {
             FREEIPA_ACCESS_MODE: 'auto', FREEIPA_FAKE_USERS: USERS, FREEIPA_FAKE_DISPLAY: DISPLAY,
             ...extra
         },
-        stdio: 'ignore'
+        stdio: ['ignore', 'pipe', 'pipe']
     });
+    // Копим вывод процесса: если сервер не поднялся, тест покажет причину, а не только «не поднялся».
+    child.log = '';
+    child.stdout.on('data', d => { child.log += d; });
+    child.stderr.on('data', d => { child.log += d; });
+    return child;
 }
 
-async function waitHealth(port, tries = 100) {
+// Проверка старта с понятным сообщением: вывод сервера попадает в текст ошибки.
+async function mustStart(child, port, what) {
+    if (await waitHealth(port)) return;
+    const tail = child.log.trim().split('\n').slice(-6).join(' | ') || '(нет вывода)';
+    assert.fail(`${what}: сервер не поднялся на порту ${port}. Вывод: ${tail}`);
+}
+
+// Ожидание старта сервера. Щедрый таймаут: файлы тестов идут параллельно, и под нагрузкой
+// (много node-процессов сразу) старт может занять заметно больше обычного. Иначе ловим
+// ложные «сервер не поднялся» и начинаем искать несуществующий баг.
+async function waitHealth(port, tries = 300) {
     for (let i = 0; i < tries; i++) {
         try { if ((await fetch(`http://127.0.0.1:${port}/healthz`)).ok) return true; } catch { /* поднимается */ }
         await new Promise(r => setTimeout(r, 100));
@@ -55,10 +70,10 @@ const postJson = (port, p, cookie, body) => authed(port, p, cookie, {
 
 test('вход через каталог: список допущенных закрывает доступ «простым» сотрудникам', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-ipa-'));
-    const port = 5300 + Math.floor(Math.random() * 150);
+    const port = 6000 + Math.floor(Math.random() * 100);
     const child = start(port, dir);
     try {
-        assert.ok(await waitHealth(port), 'сервер не поднялся');
+        await mustStart(child, port, 'список допущенных');
 
         // 1) список пуст — любой сотрудник каталога входит (прежнее поведение)
         assert.equal((await loginCookie(port, 'bob', 'good-bob')).status, 200);
@@ -117,10 +132,10 @@ test('вход через каталог: список допущенных за
 
 test('FREEIPA_ACCESS_MODE=list с пустым списком не пускает никого (явное ограничение)', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-ipa-list-'));
-    const port = 5500 + Math.floor(Math.random() * 100);
+    const port = 6150 + Math.floor(Math.random() * 100);
     const child = start(port, dir, { FREEIPA_ACCESS_MODE: 'list' });
     try {
-        assert.ok(await waitHealth(port), 'сервер не поднялся');
+        await mustStart(child, port, 'режим list');
         // список пуст, но режим задан явно — каталог не пускает
         const r = await loginCookie(port, 'bob', 'good-bob');
         assert.equal(r.status, 401);
@@ -133,10 +148,10 @@ test('FREEIPA_ACCESS_MODE=list с пустым списком не пускае�
 
 test('FREEIPA_ACCESS_MODE=open: список не ограничивает (справочник)', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-ipa-open-'));
-    const port = 5600 + Math.floor(Math.random() * 100);
+    const port = 6300 + Math.floor(Math.random() * 100);
     const child = start(port, dir, { FREEIPA_ACCESS_MODE: 'open' });
     try {
-        assert.ok(await waitHealth(port), 'сервер не поднялся');
+        await mustStart(child, port, 'режим open');
         const { cookie } = await loginCookie(port, 'alice', 'good-alice');
         // добавим в справочник, но режим open — bob всё равно входит
         assert.equal((await postJson(port, '/api/users', cookie, { username: 'alice' })).status, 200);
@@ -149,10 +164,10 @@ test('FREEIPA_ACCESS_MODE=open: список не ограничивает (сп
 
 test('в режиме local раздела «Доступ» нет: catalog=false, добавление — 400', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-ipa-local-'));
-    const port = 5800 + Math.floor(Math.random() * 100);
+    const port = 6600 + Math.floor(Math.random() * 100);
     const child = start(port, dir, { AUTH_MODE: 'local', FREEIPA_ENABLED: 'false', ADMIN_PASSWORD: 'TestPass-123456' });
     try {
-        assert.ok(await waitHealth(port), 'сервер не поднялся');
+        await mustStart(child, port, 'режим local');
         const { cookie } = await loginCookie(port, 'admin', 'TestPass-123456');
         const info = await (await authed(port, '/api/users', cookie)).json();
         assert.equal(info.catalog, false, 'в local-режиме вход через каталог выключен');
@@ -167,7 +182,7 @@ test('в режиме local раздела «Доступ» нет: catalog=fals
 
 test('неверное значение FREEIPA_ACCESS_MODE -> сервер не стартует с понятной ошибкой', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-ipa-bad-'));
-    const port = 5700 + Math.floor(Math.random() * 100);
+    const port = 6450 + Math.floor(Math.random() * 100);
     const child = spawn(process.execPath, [HELPER], {
         cwd: ROOT,
         env: {

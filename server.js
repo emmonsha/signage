@@ -337,8 +337,33 @@ app.use(session({
 }));
 app.use('/uploads', express.static(UPLOADS, { maxAge: '7d', immutable: true }));
 
-const checkAuth = (req, res, next) =>
-    req.session.authorized ? next() : res.status(401).json({ success: false, message: 'Нужна авторизация' });
+const checkAuth = (req, res, next) => {
+    if (sessionValid(req)) return next();
+    // Сессия была, но перестала быть действительной (сменился пароль или админ убрал доступ) —
+    // затираем её сразу, а не оставляем висеть в файле сессий.
+    if (req.session && req.session.authorized) req.session.destroy(() => {});
+    return res.status(401).json({ success: false, message: 'Нужна авторизация' });
+};
+
+// «Отпечаток» локальной учётной записи админки: меняется вместе с паролем. Сессия, выданная
+// при старом пароле, перестаёт действовать сразу. Без этого смена пароля (например, при утечке)
+// не выбросила бы уже вошедшего злоумышленника: сессии живут в файле на томе и переживают
+// перезапуск — это было сделано специально, чтобы деплой не выкидывал людей на страницу входа.
+const sessionCred = () => crypto.createHash('sha256')
+    .update('signage-session-cred:' + (PASSWORD_HASH || PASSWORD_PLAIN || '')).digest('hex').slice(0, 24);
+
+// Действительна ли сессия прямо сейчас. Кроме факта входа проверяем две вещи:
+//   1) не сменился ли пароль админки (отпечаток сессии не совпадает с текущим);
+//   2) для входа через каталог — не убран ли человек из списка допущенных.
+// Второе важно, потому что убрать доступ из админки можно в любой момент, а сессия
+// у него уже открыта: без проверки он продолжил бы работать до истечения cookie.
+function sessionValid(req) {
+    if (!req.session || !req.session.authorized) return false;
+    if (req.session.cred !== sessionCred()) return false;
+    const u = req.session.user || {};
+    if (u.via === 'freeipa' && !users.isAllowed(usersReg, u.username, accessMode())) return false;
+    return true;
+}
 
 // Простое ограничение попыток входа: отдельно по IP и по паре IP+логин (защита от перебора паролей).
 const fails = new Map();
@@ -402,6 +427,7 @@ app.post('/api/login', async (req, res) => {
     if (r.ok) {
         keys.forEach(k => fails.delete(k));
         req.session.authorized = true;
+        req.session.cred = sessionCred();                         // привязка к текущему паролю: смена пароля отзывает сессию
         req.session.user = r.user;                                // для отображения в админке/логах
         req.session.user.via = r.via;                             // источник входа: freeipa | local
         console.log(`Вход разрешён: ${r.user.username} (${r.via}) с ${req.ip}`);
@@ -438,7 +464,7 @@ app.get('/api/auth', (req, res) => res.json({ mode: AUTH_MODE, username: IPA_LOG
 // Текущий пользователь сессии — для значка пользователя и кнопки выхода в админке.
 // 401 без авторизации: клиент понимает, что пора показать страницу входа.
 app.get('/api/me', (req, res) => {
-    if (!req.session.authorized) return res.status(401).json({ success: false });
+    if (!sessionValid(req)) return res.status(401).json({ success: false });
     const u = req.session.user || {};
     res.json({ success: true, username: u.username || ADMIN_USER, displayName: u.displayName || u.username || ADMIN_USER, via: u.via || null });
 });
@@ -543,13 +569,13 @@ function renderLogin() {
 }
 
 app.get('/admin', (req, res) => {
-    if (req.session.authorized) return res.sendFile(path.join(PUBLIC, 'admin.html'));
+    if (sessionValid(req)) return res.sendFile(path.join(PUBLIC, 'admin.html'));
     res.type('html').send(renderLogin());
 });
 
 // Явная страница входа (устаревшие ссылки вида /login и превью в UX-аудите).
 app.get('/login', (req, res) => {
-    if (req.session.authorized) return res.redirect('/admin');
+    if (sessionValid(req)) return res.redirect('/admin');
     res.type('html').send(renderLogin());
 });
 
