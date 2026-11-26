@@ -12,6 +12,7 @@ const freeipa = require('./freeipa');
 const snapshot = require('./snapshot');
 const deploy = require('./deploy');
 const screens = require('./screens');
+const users = require('./users');
 const { buildMatcher } = require('./netguard');
 
 const PORT = process.env.PORT || 3000;
@@ -40,6 +41,16 @@ if ((AUTH_MODE === 'freeipa' || AUTH_MODE === 'both') && !IPA) {
 }
 const LOCAL_LOGIN = AUTH_MODE === 'local' || AUTH_MODE === 'both';
 const IPA_LOGIN = (AUTH_MODE === 'freeipa' || AUTH_MODE === 'both') && !!IPA;
+
+// Кто может входить через каталог. В каталоге FreeIPA, кроме «наших», обычно есть и
+// обычные сотрудники — поэтому вход ограничиваем списком допущенных (data/users.json).
+// Режим: auto — список не пуст => только он; пуст => пускаем всех из каталога (как раньше).
+// Значение можно зафиксировать явно: open (всегда все) или list (только список).
+const ACCESS_MODE = users.parseAccessMode(process.env.FREEIPA_ACCESS_MODE);
+if (ACCESS_MODE === null) {
+    console.error('FREEIPA_ACCESS_MODE: допустимы auto | open | list');
+    process.exit(1);
+}
 
 if (PASSWORD_HASH && !auth.isValidHash(PASSWORD_HASH)) {
     console.error('ADMIN_PASSWORD_HASH имеет неверный формат. Создайте новый: npm run hash-password');
@@ -106,6 +117,16 @@ function reloadRegistry() {
     registry = screens.loadRegistry(SCREENS_FILE, []);
     SCREENS = registry.screens.map(s => s.id);
 }
+
+// ---------- список допущенных к админке (для входа через каталог) ----------
+// Пароли здесь не хранятся: это только перечень «кому можно», а пароль по-прежнему
+// проверяется в каталоге (freeipa.js). См. users.js.
+const USERS_FILE = path.join(DATA, 'users.json');
+let usersReg = users.loadRegistry(USERS_FILE);
+if (!fs.existsSync(USERS_FILE)) users.save(USERS_FILE, usersReg);   // завести файл сразу, чтобы админ видел, где он лежит
+// Режим с учётом реестра: в auto ограничение включается само, как только список не пуст.
+const accessMode = () => users.effectiveMode(ACCESS_MODE, usersReg.users.length);
+function reloadUsers() { usersReg = users.loadRegistry(USERS_FILE); }
 
 // ---------- снапшоты экранов (реальный кадр с плеера) ----------
 // Адреса плееров (экран -> host/port/scheme) лежат рядом с данными: data/players.json
@@ -340,11 +361,17 @@ function bumpFail(key) {
 // не пустил (нет такого пользователя, неверный пароль или каталог недоступен).
 async function checkCredentials(username, password) {
     const login = typeof username === 'string' && username.trim() ? username.trim() : ADMIN_USER;
+    let accessDenied = false;                                     // в каталоге пустили, но нет в списке допущенных
     if (IPA_LOGIN) {
         try {
             const r = await freeipa.authenticate(IPA, login, password);
-            if (r.ok) return { ok: true, user: r.user, via: 'freeipa' };
-            if (r.reason === 'bad-password' || r.reason === 'not-found' || r.reason === 'not-in-group' || r.reason === 'ambiguous') {
+            if (r.ok) {
+                // Пароль верный — но пускаем только «своих»: в каталоге, кроме наших,
+                // есть и обычные сотрудники (см. FREEIPA_ACCESS_MODE / data/users.json).
+                if (users.isAllowed(usersReg, r.user.username, accessMode())) return { ok: true, user: r.user, via: 'freeipa' };
+                console.warn(`LDAP: «${r.user.username}» в каталоге есть, но не в списке допущенных (${accessMode()})`);
+                accessDenied = true;                              // в режиме both ниже ещё проверится аварийная локальная учётка
+            } else if (r.reason === 'bad-password' || r.reason === 'not-found' || r.reason === 'not-in-group' || r.reason === 'ambiguous') {
                 console.warn(`LDAP: отказ для «${login}» (${r.reason})`);
             } else {
                 console.warn(`LDAP: не проверялся для «${login}» (${r.reason})`);
@@ -353,14 +380,18 @@ async function checkCredentials(username, password) {
             console.error('LDAP недоступен:', e.code || e.message);
         }
         // В режиме only-freeipa аварийного локального входа нет.
-        if (!LOCAL_LOGIN) return { ok: false, reason: 'Неверный логин или пароль' };
+        if (!LOCAL_LOGIN) {
+            return accessDenied
+                ? { ok: false, reason: 'Нет доступа: учётная запись не в списке допущенных' }
+                : { ok: false, reason: 'Неверный логин или пароль' };
+        }
     }
     if (LOCAL_LOGIN && login.toLowerCase() === ADMIN_USER.toLowerCase()) {
         let ok = false;
         try { ok = await checkLocalPassword(password); } catch (e) { console.error('Ошибка проверки пароля:', e.message); }
         if (ok) return { ok: true, user: { username: ADMIN_USER, displayName: ADMIN_USER }, via: 'local' };
     }
-    return { ok: false, reason: 'Неверный логин или пароль' };
+    return { ok: false, reason: accessDenied ? 'Нет доступа: учётная запись не в списке допущенных' : 'Неверный логин или пароль' };
 }
 
 app.post('/api/login', async (req, res) => {
@@ -410,6 +441,86 @@ app.get('/api/me', (req, res) => {
     if (!req.session.authorized) return res.status(401).json({ success: false });
     const u = req.session.user || {};
     res.json({ success: true, username: u.username || ADMIN_USER, displayName: u.displayName || u.username || ADMIN_USER, via: u.via || null });
+});
+
+// ---------- доступ: список допущенных учётных записей каталога ----------
+// Управление доступом через каталог имеет смысл, только когда вход по каталогу включён.
+// В local-режиме эти API отвечают 400 — чтобы админка не показывала вингетку, которой нет смысла.
+const catalogLogin = () => IPA_LOGIN;
+const accessInfo = () => ({
+    mode: accessMode(),                       // действующий режим: open | list
+    configured: ACCESS_MODE,                  // как задано в .env: auto | open | list
+    catalog: !!IPA_LOGIN,                     // включён ли вход через каталог
+    count: usersReg.users.length,
+    envGroup: IPA ? (IPA.requireGroup || null) : null
+});
+
+app.get('/api/users', checkAuth, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, ...accessInfo(), users: usersReg.users });
+});
+
+// Добавить учётную запись в список допущенных. Тело: { username, note? }.
+// Если каталог настроен — сначала проверяем, что такой пользователь в нём есть:
+// так админ видит опечатку сразу, а не «пользователь добавлен, но войти не может».
+app.post('/api/users', checkAuth, async (req, res) => {
+    if (!catalogLogin()) return res.status(400).json({ success: false, message: 'Вход через каталог не настроен (AUTH_MODE=local)' });
+    const username = users.clean((req.body || {}).username);
+    if (!users.isValid(username)) {
+        return res.status(400).json({ success: false, message: 'Недопустимый логин: буквы, цифры, точка, дефис, подчёркивание (до 64 символов)' });
+    }
+    if (users.has(usersReg, username)) return res.status(409).json({ success: false, message: `«${username}» уже в списке допущенных` });
+
+    let displayName = '';
+    try {
+        const r = await freeipa.findUser(IPA, username);
+        if (!r.ok) {
+            const msg = r.reason === 'not-found' ? `В каталоге нет пользователя «${username}»`
+                : r.reason === 'ambiguous' ? `В каталоге несколько записей с логином «${username}»`
+                : `Логин не проверен (${r.reason})`;
+            return res.status(400).json({ success: false, message: msg });
+        }
+        displayName = r.user.displayName || '';
+    } catch (e) {
+        console.error('LDAP при добавлении:', e.code || e.message);
+        return res.status(503).json({ success: false, message: 'Каталог недоступен — не могу проверить логин. Повторите позже.' });
+    }
+
+    const rec = {
+        username,
+        displayName,
+        note: users.clip((req.body || {}).note, 120),
+        addedAt: new Date().toISOString(),
+        addedBy: (req.session.user && req.session.user.username) || ADMIN_USER
+    };
+    usersReg.users.push(rec);
+    usersReg = users.normalize(usersReg);
+    users.save(USERS_FILE, usersReg);
+    reloadUsers();
+    console.log(`Доступ через каталог: добавлен «${username}» (${rec.addedBy}); режим доступа — ${accessMode()}`);
+    res.json({ success: true, ...accessInfo(), user: rec });
+});
+
+// Убрать учётную запись из списка. Тело: { password } — действие опасное:
+// подтверждаем паролем текущего пользователя, как удаление экрана.
+app.post('/api/users/delete', checkAuth, async (req, res) => {
+    if (!catalogLogin()) return res.status(400).json({ success: false, message: 'Вход через каталог не настроен (AUTH_MODE=local)' });
+    const username = users.clean((req.body || {}).username);
+    const rec = users.get(usersReg, username);
+    if (!rec) return res.status(404).json({ success: false, message: 'Запись не найдена' });
+    const key = `user-del|${req.ip}`;
+    if (throttled(key)) return res.status(429).json({ success: false, message: 'Слишком много попыток, подождите' });
+    if (!(await confirmPassword(req, (req.body || {}).password))) {
+        bumpFail(key);
+        console.warn(`Отказ удаления «${username}» из доступа: неверный пароль (${req.ip})`);
+        return res.status(403).json({ success: false, message: 'Неверный пароль' });
+    }
+    fails.delete(key);
+    usersReg.users = usersReg.users.filter(u => u.username !== username);
+    users.save(USERS_FILE, usersReg);
+    reloadUsers();
+    console.log(`Доступ через каталог: убран «${username}»; режим доступа — ${accessMode()}`);
+    res.json({ success: true, ...accessInfo() });
 });
 
 // Страница входа. Логин/подсказка отрисовываются по режиму AUTH_MODE прямо в HTML,
@@ -872,6 +983,12 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     registry.screens.forEach(s => console.log(`Плеер ${s.name}: http://<IP>:${PORT}${playerUrl(s.token)}`));
     if (!PASSWORD_HASH && LOCAL_LOGIN) console.warn('⚠ Используется открытый ADMIN_PASSWORD. Лучше ADMIN_PASSWORD_HASH: npm run hash-password');
     console.log(`Аутентификация: ${AUTH_MODE}` + (IPA_LOGIN ? ` (FreeIPA: ${IPA.url}, база ${IPA.userBaseDn})` : ''));
+    if (IPA_LOGIN) {
+        const m = accessMode();
+        console.log(m === 'list'
+            ? `Доступ через каталог: только список допущенных (${usersReg.users.length} запис.): раздел «Доступ» в админке`
+            : 'Доступ через каталог: без ограничения (список допущенных пуст) — добавьте учётки в разделе «Доступ», чтобы закрыть вход остальным');
+    }
     console.log(DEPLOY ? `Автодеплой включён: агент ${DEPLOY.url}` : 'Автодеплой выключен (DEPLOY_ENABLED=true для кнопки «Обновить»)');
     console.log(ADMIN_NETS ? `Админка ограничена: ${process.env.ADMIN_ALLOWED_NETS}` : '⚠ ADMIN_ALLOWED_NETS не задан: админка доступна из любой сети');
 });

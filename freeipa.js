@@ -156,4 +156,35 @@ async function authenticate(cfg, username, password, deps = {}) {
     };
 }
 
-module.exports = { loadConfig, authenticate, bool };
+// Поиск пользователя в каталоге без проверки пароля (для админки: подсказать имя и
+// убедиться, что логин существует, прежде чем добавлять его в список допущенных).
+// Возвращает { ok: true, user } | { ok: false, reason }. Сетевые сбои пробрасывает:
+// вызывающая сторона решает, показать «каталог недоступен» или просто не подсказывать.
+async function findUser(cfg, username, deps = {}) {
+    const login = String(username || '').trim();
+    if (!login) return { ok: false, reason: 'empty-username' };
+    if (login.length > 256) return { ok: false, reason: 'too-long' };
+
+    const filter = cfg.userFilter.replace('{username}', Filter.escape(login));
+    const entries = await withClient(cfg, async client => {
+        if (cfg.startTLS) await client.startTLS(cfg.tlsOptions || {});
+        if (cfg.bindDn) await client.bind(cfg.bindDn, cfg.bindPassword);
+        const res = await client.search(cfg.userBaseDn, { scope: 'sub', filter, attributes: cfg.attrs, sizeLimit: 2 });
+        return res.searchEntries;
+    }, deps);
+
+    if (!entries.length) return { ok: false, reason: 'not-found' };
+    if (entries.length > 1) return { ok: false, reason: 'ambiguous' };
+    const entry = entries[0];
+    return {
+        ok: true,
+        user: {
+            username: first(entry, 'uid') || login,
+            dn: entry.dn,
+            displayName: first(entry, 'displayName') || first(entry, 'cn') || first(entry, 'uid') || login,
+            mail: first(entry, 'mail')
+        }
+    };
+}
+
+module.exports = { loadConfig, authenticate, findUser, bool };

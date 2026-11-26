@@ -702,6 +702,7 @@ details.snapdet > summary { color: var(--accent); }
   <h1>Управление экранами</h1>
   <div>
     <button class="btn deploy" id="deployBtn" hidden onclick="doDeploy()">⬆ Обновить систему</button>
+    <button class="btn" id="accessBtn" hidden onclick="openAccess()">🔑 Доступ</button>
     <button class="btn success" onclick="addScreen()">＋ Экран</button>
     <div class="user" id="userBox" hidden>
       <button class="user-btn" id="userBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="userMenu" onclick="toggleUserMenu(event)">
@@ -721,6 +722,46 @@ details.snapdet > summary { color: var(--accent); }
   <pre id="deployLog" style="max-height:220px;overflow:auto;background:#0d1117;color:#c9d1d9;padding:8px;border-radius:4px;font-size:11px;margin-top:6px;white-space:pre-wrap"></pre>
 </div>
 <div class="screens" id="screens">Загрузка…</div>
+
+<div class="modal" id="accessModal" role="dialog" aria-modal="true" aria-labelledby="accessTitle">
+  <div class="modal-content" style="width:520px">
+    <h3 id="accessTitle">🔑 Кто может входить</h3>
+    <p style="font-size:13px;color:#555;margin:0 0 12px">
+      Вход по доменной учётной записи. Список ниже решает, кого пускать: пока он не пуст,
+      остальные сотрудники каталога войти не смогут. Пароли здесь не хранятся — пароль
+      по-прежнему проверяется в каталоге.
+    </p>
+    <div class="snapinfo" id="accessModeInfo" style="margin-bottom:12px"></div>
+    <div id="accessList"></div>
+    <div class="fg" style="margin-top:14px">
+      <label for="accessLogin">Добавить учётную запись</label>
+      <input type="text" id="accessLogin" autocomplete="off" placeholder="доменный логин, например ivanov" onkeydown="if(event.key==='Enter')addUser()">
+    </div>
+    <div class="fg">
+      <label for="accessNote">Комментарий (необязательно)</label>
+      <input type="text" id="accessNote" autocomplete="off" maxlength="120" placeholder="например: инженер, 3 этаж">
+    </div>
+    <button class="btn success" id="accessAddBtn" onclick="addUser()">Добавить</button>
+    <button class="btn" onclick="closeAccess()">Закрыть</button>
+    <div class="snapinfo" id="accessMsg"></div>
+  </div>
+</div>
+
+<div class="modal" id="userDelModal" role="dialog" aria-modal="true" aria-labelledby="userDelTitle">
+  <div class="modal-content">
+    <h3 id="userDelTitle">Убрать доступ?</h3>
+    <p style="font-size:13px;color:#555;margin:0 0 10px">Учётная запись: <b id="userDelName"></b></p>
+    <p style="font-size:13px;color:#c0392b;margin:0 0 10px">
+      Этот человек больше не сможет войти в админку своей доменной учёткой. Учётная запись в
+      каталоге не затрагивается.
+    </p>
+    <div class="fg"><label>Пароль администратора</label>
+      <input type="password" id="userDelPass" autocomplete="current-password" placeholder="Введите пароль" onkeydown="if(event.key==='Enter')userDelConfirm()"></div>
+    <button class="btn danger" id="userDelGo" onclick="userDelConfirm()">Убрать доступ</button>
+    <button class="btn" onclick="closeUserDel()">Отмена</button>
+    <div class="snapinfo" id="userDelMsg"></div>
+  </div>
+</div>
 
 <div class="modal" id="delModal" role="dialog" aria-modal="true" aria-labelledby="delTitle">
   <div class="modal-content">
@@ -1356,10 +1397,102 @@ function paintUser(u) {
   })();
 })();
 
+// ---------- доступ: список допущенных учётных записей каталога ----------
+let accessState = null, userDelName = null;
+
+async function initAccess() {
+  let d;
+  try {
+    const r = await fetch('/api/users');
+    if (r.status === 400 || r.status === 401) return;   // каталог не настроен / не авторизован — раздел не нужен
+    d = await r.json();
+  } catch { return; }                                   // сеть/сервер — просто без кнопки
+  if (!d || !d.catalog) return;
+  accessState = d;
+  $('accessBtn').hidden = false;
+}
+
+function accessModeText(info) {
+  if (info.mode === 'list') return `Сейчас пускаем только этих: ${info.count}. Остальные сотрудники каталога войти не могут.`;
+  return 'Список пуст — сейчас войти может любой сотрудник каталога. Добавьте первого, и вход остальным закроется.';
+}
+
+async function openAccess() {
+  $('accessModal').style.display = 'flex';
+  $('accessMsg').textContent = '';
+  await loadUsers();
+  const f = $('accessLogin'); if (f) f.focus();
+}
+function closeAccess() { $('accessModal').style.display = 'none'; }
+
+async function loadUsers() {
+  let d;
+  try { d = await api('/api/users'); } catch { return; }
+  accessState = d;
+  $('accessModeInfo').textContent = accessModeText(d);
+  const box = $('accessList');
+  if (!d.users || !d.users.length) {
+    box.innerHTML = '<div class="snapinfo" style="padding:10px 0">Список пуст.</div>';
+    return;
+  }
+  box.innerHTML = d.users.map(u => `
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #eef1f5">
+      <div style="flex:1;min-width:0">
+        <b>${esc(u.username)}</b>${u.displayName ? ` <span style="color:#555">— ${esc(u.displayName)}</span>` : ''}
+        ${u.note ? `<div style="font-size:12px;color:#777">${esc(u.note)}</div>` : ''}
+      </div>
+      <button class="btn danger" style="flex:none" onclick="askRemoveUser('${esc(u.username)}')">Убрать</button>
+    </div>`).join('');
+}
+
+async function addUser() {
+  const login = ($('accessLogin').value || '').trim();
+  const btn = $('accessAddBtn');
+  if (!login) { toast('Укажите доменный логин', 'error'); return; }
+  btn.disabled = true; $('accessMsg').textContent = 'Проверяю в каталоге…';
+  try {
+    const r = await fetch('/api/users', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: login, note: ($('accessNote').value || '').trim() })
+    });
+    const d = await r.json();
+    if (r.status === 401) { location.reload(); return; }
+    if (!d.success) { $('accessMsg').textContent = ''; toast(d.message || 'Не удалось добавить', 'error'); return; }
+    $('accessLogin').value = ''; $('accessNote').value = ''; $('accessMsg').textContent = '';
+    toast('Доступ выдан: ' + login);
+    await loadUsers();
+    $('accessLogin').focus();
+  } catch {
+    $('accessMsg').textContent = ''; toast('Ошибка сети', 'error');
+  } finally { btn.disabled = false; }
+}
+
+function askRemoveUser(name) { userDelName = name; $('userDelName').textContent = name; $('userDelPass').value = ''; $('userDelMsg').textContent = ''; $('userDelModal').style.display = 'flex'; $('userDelPass').focus(); }
+function closeUserDel() { $('userDelModal').style.display = 'none'; userDelName = null; }
+async function userDelConfirm() {
+  if (!userDelName) return;
+  const go = $('userDelGo'); go.disabled = true;
+  try {
+    const r = await fetch('/api/users/delete', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: userDelName, password: $('userDelPass').value })
+    });
+    const d = await r.json();
+    if (r.status === 401) { location.reload(); return; }
+    if (!d.success) { $('userDelMsg').textContent = d.message || 'Не удалось убрать'; return; }
+    toast('Доступ убран: ' + userDelName);
+    closeUserDel();
+    await loadUsers();
+  } catch { $('userDelMsg').textContent = 'Ошибка сети'; }
+  finally { go.disabled = false; }
+}
+
 // ---------- доступность модалок: Escape и клик по затемнению ----------
 const MODALS = [
   { id: 'delModal', close: () => closeDel() },
   { id: 'regenModal', close: () => closeRegen() },
+  { id: 'accessModal', close: () => closeAccess() },
+  { id: 'userDelModal', close: () => closeUserDel() },
   { id: 'modal', close: () => closeModal() }
 ];
 function openModals() { return MODALS.filter(m => $(m.id) && $(m.id).style.display === 'flex'); }
@@ -1581,6 +1714,7 @@ async function delSnap(i, f) {
   await load();
   SCREENS.forEach(i => { loadAddr(i); loadSnaps(i); });
   initDeploy();
+  initAccess();
   loadStatus();
   setInterval(load, 10000);
   setInterval(loadStatus, 5000);
