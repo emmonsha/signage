@@ -6,6 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
+const { portIn } = require('./helpers/port');
 
 const ROOT = path.join(__dirname, '..');
 const HELPER = path.join(__dirname, 'helpers', 'fake-ipa-server.js');
@@ -57,7 +58,7 @@ const postJson = (port, p, cookie, body) => authed(port, p, cookie, {
 
 test('панель сессий: показывает активные входы, завершение чужой сессии работает', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-sess-users-'));
-    const port = 6800 + Math.floor(Math.random() * 60);
+    const port = portIn(6800, 60);
     const child = start(port, dir);
     try {
         await mustStart(child, port);
@@ -110,7 +111,7 @@ test('панель сессий: показывает активные вход�
 
 test('убранный из списка допущенных сразу помечается как недействительный', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-sess-drop-'));
-    const port = 7000 + Math.floor(Math.random() * 60);
+    const port = portIn(7000, 60);
     const child = start(port, dir);
     try {
         await mustStart(child, port);
@@ -139,7 +140,7 @@ test('убранный из списка допущенных сразу пом�
 
 test('панель не показывает мёртвые сессии (сменился пароль)', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-sess-stale-'));
-    const port = 7100 + Math.floor(Math.random() * 60);
+    const port = portIn(7100, 60);
     let child = start(port, dir);
     try {
         await mustStart(child, port);
@@ -166,7 +167,7 @@ test('панель не показывает мёртвые сессии (сме
 
 test('в local-режиме панель показывает сессии, но списка допущенных нет', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-sess-local-'));
-    const port = 7200 + Math.floor(Math.random() * 60);
+    const port = portIn(7200, 60);
     const child = start(port, dir, { AUTH_MODE: 'local', FREEIPA_ENABLED: 'false', ADMIN_PASSWORD: 'TestPass-123456' });
     try {
         await mustStart(child, port);

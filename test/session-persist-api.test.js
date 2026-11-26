@@ -7,6 +7,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
+const { portIn } = require('./helpers/port');
 
 const PASSWORD = 'test-pass-123';
 const SERVER = path.join(__dirname, '..', 'server.js');
@@ -39,7 +40,7 @@ const login = async (port, password = PASSWORD) => {
 
 test('сессия админки переживает перезапуск сервера', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-sess-'));
-    const port = 5200 + Math.floor(Math.random() * 150);
+    const port = portIn(5200, 150);
     let child = start(port, dir);
     try {
         assert.ok(await waitHealth(port), 'сервер не поднялся');
@@ -74,7 +75,7 @@ test('смена пароля отзывает уже выданные сесс�
     // к паролю украденная cookie работала бы вечно. Поэтому сессия помнит «отпечаток»
     // текущего пароля, и смена пароля делает старые сессии недействительными.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-sess-pw-'));
-    const port = 5800 + Math.floor(Math.random() * 100);
+    const port = portIn(5800, 100);
     const NEW_PASSWORD = 'brand-new-pass-987';
     let child = start(port, dir);
     try {
@@ -110,7 +111,7 @@ test('смена пароля отзывает уже выданные сесс�
 
 test('без cookie админка отдаёт логин (не 500)', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-sess2-'));
-    const port = 5400 + Math.floor(Math.random() * 150);
+    const port = portIn(5400, 150);
     const child = start(port, dir);
     try {
         assert.ok(await waitHealth(port), 'сервер не поднялся');
@@ -127,7 +128,7 @@ test('без cookie админка отдаёт логин (не 500)', async ()
 
 test('файлы сессий и секрет лежат на томе (переживут смену контейнера)', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-sess3-'));
-    const port = 5600 + Math.floor(Math.random() * 150);
+    const port = portIn(5600, 150);
     const child = start(port, dir);
     try {
         assert.ok(await waitHealth(port), 'сервер не поднялся');

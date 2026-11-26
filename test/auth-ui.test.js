@@ -10,6 +10,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
+const { portIn } = require('./helpers/port');
 
 const PASSWORD = 'TestPass-123456';
 const ROOT = path.join(__dirname, '..');
@@ -59,7 +60,7 @@ test('admin.html: значок пользователя и выпадающее 
 test('поле логина показывается всегда: при FreeIPA пустое, в local предзаполнено', async () => {
     // both/freeipa: поле есть, но логин вводит пользователь -> пустое
     const dir1 = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-authui-'));
-    const port1 = 4200 + Math.floor(Math.random() * 90);
+    const port1 = portIn(4200, 90);
     const child1 = start(port1, dir1, {
         AUTH_MODE: 'both', FREEIPA_ENABLED: 'true', FREEIPA_URL: 'ldaps://ipa.invalid:636',
         FREEIPA_BASE_DN: 'dc=example,dc=com',
@@ -79,7 +80,7 @@ test('поле логина показывается всегда: при FreeIP
 
     // local: учётка одна — поле показано и предзаполнено ADMIN_USER
     const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-authui2-'));
-    const port2 = 4300 + Math.floor(Math.random() * 90);
+    const port2 = portIn(4300, 90);
     const child2 = start(port2, dir2, { AUTH_MODE: 'local', FREEIPA_ENABLED: 'false', ADMIN_USER: 'admin' });
     try {
         assert.ok(await waitHealth(port2), 'сервер не поднялся');
@@ -96,7 +97,7 @@ test('поле логина показывается всегда: при FreeIP
 
 test('/api/me: 401 без входа и данные пользователя после входа', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-authui3-'));
-    const port = 4400 + Math.floor(Math.random() * 90);
+    const port = portIn(4400, 90);
     const child = start(port, dir, { AUTH_MODE: 'local' });
     try {
         assert.ok(await waitHealth(port), 'сервер не поднялся');

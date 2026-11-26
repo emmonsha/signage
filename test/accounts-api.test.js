@@ -8,6 +8,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
+const { portIn } = require('./helpers/port');
 
 const ROOT = path.join(__dirname, '..');
 const ADMIN_PW = 'admin-passphrase';
@@ -51,7 +52,7 @@ const postJson = (port, p, cookie, body) => authed(port, p, cookie, {
 
 test('учётные записи: создание, вход, запрет встроенного логина и короткого пароля', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-acct-'));
-    const port = 7400 + Math.floor(Math.random() * 60);
+    const port = portIn(7400, 60);
     const child = start(port, dir);
     try {
         await mustStart(child, port);
@@ -94,7 +95,7 @@ test('учётные записи: создание, вход, запрет вс
 
 test('удаление учётной записи завершает её сессии и запрещает вход', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-acct-del-'));
-    const port = 7500 + Math.floor(Math.random() * 60);
+    const port = portIn(7500, 60);
     const child = start(port, dir);
     try {
         await mustStart(child, port);
@@ -120,7 +121,7 @@ test('удаление учётной записи завершает её се�
 
 test('себя удалить нельзя: своя учётная запись защищена', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-acct-self-'));
-    const port = 7600 + Math.floor(Math.random() * 60);
+    const port = portIn(7600, 60);
     const child = start(port, dir);
     try {
         await mustStart(child, port);
@@ -137,7 +138,7 @@ test('себя удалить нельзя: своя учётная запись
 
 test('смена режима входа из панели включает каталог без правки .env', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-set-mode-'));
-    const port = 7800 + Math.floor(Math.random() * 60);
+    const port = portIn(7800, 60);
     const child = spawn(process.execPath, [path.join(__dirname, 'helpers', 'fake-ipa-server.js')], {
         cwd: ROOT,
         env: {
@@ -183,7 +184,7 @@ test('смена режима входа из панели включает ка
 
 test('настройки каталога: сохранение, секрет не отдаётся, мусор отклоняется', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-set-'));
-    const port = 7700 + Math.floor(Math.random() * 60);
+    const port = portIn(7700, 60);
     const child = start(port, dir);
     try {
         await mustStart(child, port);

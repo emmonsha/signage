@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('child_process');
+const { portIn } = require('./helpers/port');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -23,7 +24,7 @@ async function waitHealth(port, tries = 100) {
 
 test('удаление экрана требует верный пароль', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-api-'));
-    const port = 3900 + Math.floor(Math.random() * 90);
+    const port = portIn(3900, 90);
     const hash = await hashPassword(PASSWORD);
     const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
         env: { ...process.env, PORT: String(port), STORAGE_DIR: dir, ADMIN_PASSWORD_HASH: hash,
@@ -79,7 +80,7 @@ test('удаление экрана требует верный пароль', a
 
 test('плейлист доступен только по токену', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-api-'));
-    const port = 4000 + Math.floor(Math.random() * 90);
+    const port = portIn(4000, 90);
     const hash = await hashPassword(PASSWORD);
     const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
         env: { ...process.env, PORT: String(port), STORAGE_DIR: dir, ADMIN_PASSWORD_HASH: hash,
@@ -112,7 +113,7 @@ test('плейлист доступен только по токену', async (
 
 test('старый формат heartbeat (screen) отклоняется с подсказкой', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-api-'));
-    const port = 4100 + Math.floor(Math.random() * 90);
+    const port = portIn(4100, 90);
     const hash = await hashPassword(PASSWORD);
     const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
         env: { ...process.env, PORT: String(port), STORAGE_DIR: dir, ADMIN_PASSWORD_HASH: hash,

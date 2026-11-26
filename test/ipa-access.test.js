@@ -8,6 +8,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
+const { portIn } = require('./helpers/port');
 
 const ROOT = path.join(__dirname, '..');
 const HELPER = path.join(__dirname, 'helpers', 'fake-ipa-server.js');
@@ -70,7 +71,7 @@ const postJson = (port, p, cookie, body) => authed(port, p, cookie, {
 
 test('вход через каталог: список допущенных закрывает доступ «простым» сотрудникам', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-ipa-'));
-    const port = 6000 + Math.floor(Math.random() * 100);
+    const port = portIn(6000, 100);
     const child = start(port, dir);
     try {
         await mustStart(child, port, 'список допущенных');
@@ -132,7 +133,7 @@ test('вход через каталог: список допущенных за
 
 test('FREEIPA_ACCESS_MODE=list с пустым списком не пускает никого (явное ограничение)', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-ipa-list-'));
-    const port = 6150 + Math.floor(Math.random() * 100);
+    const port = portIn(6150, 100);
     const child = start(port, dir, { FREEIPA_ACCESS_MODE: 'list' });
     try {
         await mustStart(child, port, 'режим list');
@@ -148,7 +149,7 @@ test('FREEIPA_ACCESS_MODE=list с пустым списком не пускае�
 
 test('FREEIPA_ACCESS_MODE=open: список не ограничивает (справочник)', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-ipa-open-'));
-    const port = 6300 + Math.floor(Math.random() * 100);
+    const port = portIn(6300, 100);
     const child = start(port, dir, { FREEIPA_ACCESS_MODE: 'open' });
     try {
         await mustStart(child, port, 'режим open');
@@ -164,7 +165,7 @@ test('FREEIPA_ACCESS_MODE=open: список не ограничивает (сп
 
 test('в режиме local раздела «Доступ» нет: catalog=false, добавление — 400', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-ipa-local-'));
-    const port = 6600 + Math.floor(Math.random() * 100);
+    const port = portIn(6600, 100);
     const child = start(port, dir, { AUTH_MODE: 'local', FREEIPA_ENABLED: 'false', ADMIN_PASSWORD: 'TestPass-123456' });
     try {
         await mustStart(child, port, 'режим local');
@@ -182,7 +183,7 @@ test('в режиме local раздела «Доступ» нет: catalog=fals
 
 test('неверное значение FREEIPA_ACCESS_MODE -> сервер не стартует с понятной ошибкой', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-ipa-bad-'));
-    const port = 6450 + Math.floor(Math.random() * 100);
+    const port = portIn(6450, 100);
     const child = spawn(process.execPath, [HELPER], {
         cwd: ROOT,
         env: {
