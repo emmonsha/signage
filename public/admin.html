@@ -703,6 +703,8 @@ details.snapdet > summary { color: var(--accent); }
   <div>
     <button class="btn deploy" id="deployBtn" hidden onclick="doDeploy()">⬆ Обновить систему</button>
     <button class="btn" id="usersBtn" hidden onclick="openUsers()">👥 Пользователи</button>
+    <button class="btn" id="sessionsBtn" hidden onclick="openSessions()">🖥 Сессии</button>
+    <button class="btn" id="settingsBtn" hidden onclick="openSettings()">⚙️ Настройки</button>
     <button class="btn success" onclick="addScreen()">＋ Экран</button>
     <div class="user" id="userBox" hidden>
       <button class="user-btn" id="userBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="userMenu" onclick="toggleUserMenu(event)">
@@ -723,28 +725,54 @@ details.snapdet > summary { color: var(--accent); }
 </div>
 <div class="screens" id="screens">Загрузка…</div>
 
+<!-- Панель «Пользователи»: учётные записи (локальные и допущенные из каталога). -->
 <div class="modal" id="usersModal" role="dialog" aria-modal="true" aria-labelledby="usersTitle">
-  <div class="modal-content" style="width:560px">
+  <div class="modal-content" style="width:600px;max-height:88vh;overflow:auto">
     <h3 id="usersTitle">👥 Пользователи</h3>
-
-    <h4 style="margin:0 0 6px;font-size:var(--fs-m)">Сейчас работают</h4>
-    <p style="font-size:12px;color:#777;margin:0 0 8px">
-      Активные входы в панель. Сессия живёт до выхода или 12 часов; перезапуск сервера она переживает.
-      Можно завершить чужую сессию (например, потерян ноутбук).
+    <p style="font-size:12px;color:#777;margin:0 0 12px">
+      Кто может войти в панель. Все учётные записи — равноправные администраторы (ролей нет).
     </p>
-    <div id="sessList"><div class="snapinfo">Загрузка…</div></div>
 
-    <div id="accessSection" style="margin-top:18px">
-      <h4 style="margin:0 0 6px;font-size:var(--fs-m)">Кто может входить</h4>
+    <h4 style="margin:0 0 6px;font-size:var(--fs-m)">Учётные записи</h4>
+    <p style="font-size:12px;color:#777;margin:0 0 8px">
+      Логин и пароль, заведённые прямо здесь. Пароль хранится только в виде хэша — восстановить
+      его нельзя, можно лишь задать новый. Встроенную учётную запись (в .env) удалить отсюда нельзя:
+      это аварийный вход.
+    </p>
+    <div id="acctList"><div class="snapinfo">Загрузка…</div></div>
+
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid #eef1f5">
+      <div class="fg">
+        <label for="acctLogin">Логин</label>
+        <input type="text" id="acctLogin" autocomplete="off" placeholder="например: ivanov" onkeydown="if(event.key==='Enter')saveAccount()">
+      </div>
+      <div class="fg">
+        <label for="acctPass">Пароль (от 10 символов)</label>
+        <input type="password" id="acctPass" autocomplete="new-password" placeholder="длинная фраза надёжнее" onkeydown="if(event.key==='Enter')saveAccount()">
+      </div>
+      <div class="fg">
+        <label for="acctName">Имя (необязательно)</label>
+        <input type="text" id="acctName" autocomplete="off" maxlength="80" placeholder="например: Иван Петров">
+      </div>
+      <div class="fg">
+        <label for="acctNote">Комментарий (необязательно)</label>
+        <input type="text" id="acctNote" autocomplete="off" maxlength="120" placeholder="например: инженер, 3 этаж">
+      </div>
+      <button class="btn success" id="acctAddBtn" onclick="saveAccount()">Создать учётную запись</button>
+      <div class="snapinfo" id="acctMsg"></div>
+    </div>
+
+    <div id="accessSection" style="margin-top:16px;padding-top:12px;border-top:1px solid #eef1f5">
+      <h4 style="margin:0 0 6px;font-size:var(--fs-m)">Допущенные из каталога</h4>
       <p style="font-size:12px;color:#777;margin:0 0 8px">
-        Вход по доменной учётной записи. Список решает, кого пускать: пока он не пуст,
+        Вход по доменной учётной записи через FreeIPA. Список решает, кого пускать: пока он не пуст,
         остальные сотрудники каталога войти не смогут. Пароли здесь не хранятся — пароль
-        по-прежнему проверяется в каталоге. Все из списка — равноправные администраторы.
+        по-прежнему проверяется в каталоге.
       </p>
       <div class="snapinfo" id="accessModeInfo" style="margin-bottom:10px"></div>
       <div id="accessList"></div>
       <div class="fg" style="margin-top:12px">
-        <label for="accessLogin">Добавить учётную запись</label>
+        <label for="accessLogin">Добавить доменный логин</label>
         <input type="text" id="accessLogin" autocomplete="off" placeholder="доменный логин, например ivanov" onkeydown="if(event.key==='Enter')addUser()">
       </div>
       <div class="fg">
@@ -756,6 +784,91 @@ details.snapdet > summary { color: var(--accent); }
     </div>
 
     <div style="margin-top:16px"><button class="btn" onclick="closeUsers()">Закрыть</button></div>
+  </div>
+</div>
+
+<!-- Панель «Сессии»: кто сейчас работает. Отдельно от управления учётными записями. -->
+<div class="modal" id="sessModal" role="dialog" aria-modal="true" aria-labelledby="sessTitle">
+  <div class="modal-content" style="width:600px;max-height:88vh;overflow:auto">
+    <h3 id="sessTitle">🖥 Сессии</h3>
+    <p style="font-size:12px;color:#777;margin:0 0 10px">
+      Активные входы в панель. Сессия живёт до выхода или 12 часов; перезапуск сервера она переживает.
+      Можно завершить чужую сессию (например, потерян ноутбук).
+    </p>
+    <div id="sessList"><div class="snapinfo">Загрузка…</div></div>
+    <div style="margin-top:16px"><button class="btn" onclick="closeSessions()">Закрыть</button></div>
+  </div>
+</div>
+
+<!-- Панель «Настройки»: подключение к каталогу FreeIPA. Доступна только администратору (как и всё в панели). -->
+<div class="modal" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+  <div class="modal-content" style="width:620px;max-height:88vh;overflow:auto">
+    <h3 id="settingsTitle">⚙️ Настройки каталога (FreeIPA)</h3>
+    <p style="font-size:12px;color:#777;margin:0 0 12px">
+      Задайте подключение к каталогу прямо здесь — значения перекрывают .env. «Сбросить к .env»
+      возвращает настройки из файла. Пароль сервисной учётной записи вводится здесь и наружу не отдаётся.
+    </p>
+
+    <div class="fg">
+      <label for="setMode">Способы входа</label>
+      <select id="setMode" style="width:100%;padding:6px">
+        <option value="local">Только локальные учётные записи</option>
+        <option value="freeipa">Только каталог FreeIPA</option>
+        <option value="both">Каталог FreeIPA + аварийный локальный вход</option>
+      </select>
+    </div>
+
+    <div class="fg" style="display:flex;align-items:center;gap:8px">
+      <input type="checkbox" id="setEnabled" style="width:auto">
+      <label for="setEnabled" style="margin:0">Каталог FreeIPA включён (FREEIPA_ENABLED)</label>
+    </div>
+
+    <div class="fg">
+      <label for="setUrl">Адрес каталога (необязательно, если задан хост)</label>
+      <input type="text" id="setUrl" autocomplete="off" placeholder="ldaps://ipa.example.com:636">
+    </div>
+    <p class="snapinfo" style="margin:-4px 0 8px">Или по частям — удобно при нестандартном порте:</p>
+    <div class="fg" style="display:flex;gap:8px">
+      <div style="flex:2"><label for="setHost">Хост</label><input type="text" id="setHost" autocomplete="off" placeholder="ipa.example.com"></div>
+      <div style="flex:1"><label for="setScheme">Схема</label><input type="text" id="setScheme" autocomplete="off" placeholder="ldaps"></div>
+      <div style="flex:1"><label for="setPort">Порт</label><input type="text" id="setPort" autocomplete="off" placeholder="636"></div>
+    </div>
+
+    <div class="fg">
+      <label for="setBaseDn">База поиска (BASE_DN)</label>
+      <input type="text" id="setBaseDn" autocomplete="off" placeholder="dc=example,dc=com">
+    </div>
+    <div class="fg">
+      <label for="setUserBaseDn">Где искать пользователей (необязательно)</label>
+      <input type="text" id="setUserBaseDn" autocomplete="off" placeholder="cn=users,cn=accounts,dc=example,dc=com">
+    </div>
+    <div class="fg">
+      <label for="setBindDn">Сервисная учётная запись (DN)</label>
+      <input type="text" id="setBindDn" autocomplete="off" placeholder="uid=signage-bind,cn=users,cn=accounts,dc=example,dc=com">
+    </div>
+    <div class="fg">
+      <label for="setBindPass">Пароль сервисной учётной записи</label>
+      <input type="password" id="setBindPass" autocomplete="new-password" placeholder="оставьте пустым — не менять">
+      <div class="snapinfo" id="setBindPassState" style="margin-top:4px"></div>
+    </div>
+    <div class="fg">
+      <label for="setFilter">Фильтр поиска пользователя (необязательно)</label>
+      <input type="text" id="setFilter" autocomplete="off" placeholder="(uid={username})">
+    </div>
+    <div class="fg">
+      <label for="setGroup">Пускать только участников группы (необязательно)</label>
+      <input type="text" id="setGroup" autocomplete="off" placeholder="cn=signage-admins,cn=groups,cn=accounts,dc=example,dc=com">
+    </div>
+    <div class="fg" style="display:flex;gap:16px;align-items:center">
+      <label style="display:flex;align-items:center;gap:6px;margin:0"><input type="checkbox" id="setStartTls" style="width:auto"> StartTLS (для ldap://)</label>
+      <label style="display:flex;align-items:center;gap:6px;margin:0"><input type="checkbox" id="setTlsStrict" style="width:auto"> Проверять сертификат</label>
+    </div>
+
+    <div class="snapinfo" id="setState" style="margin:10px 0"></div>
+    <button class="btn success" id="setSaveBtn" onclick="saveSettings()">Сохранить</button>
+    <button class="btn" onclick="resetSettings()">Сбросить к .env</button>
+    <button class="btn" onclick="closeSettings()">Закрыть</button>
+    <div class="snapinfo" id="setMsg"></div>
   </div>
 </div>
 
@@ -787,6 +900,22 @@ details.snapdet > summary { color: var(--accent); }
     <button class="btn danger" id="userDelGo" onclick="userDelConfirm()">Убрать доступ</button>
     <button class="btn" onclick="closeUserDel()">Отмена</button>
     <div class="snapinfo" id="userDelMsg"></div>
+  </div>
+</div>
+
+<div class="modal" id="acctDelModal" role="dialog" aria-modal="true" aria-labelledby="acctDelTitle">
+  <div class="modal-content">
+    <h3 id="acctDelTitle">Удалить учётную запись?</h3>
+    <p style="font-size:13px;color:#555;margin:0 0 10px">Логин: <b id="acctDelName"></b></p>
+    <p style="font-size:13px;color:#c0392b;margin:0 0 10px">
+      Человек больше не сможет войти этой учётной записью, а его активные сессии завершатся сразу.
+      Это действие нельзя отменить.
+    </p>
+    <div class="fg"><label>Ваш пароль</label>
+      <input type="password" id="acctDelPass" autocomplete="current-password" placeholder="Введите пароль" onkeydown="if(event.key==='Enter')acctDelConfirm()"></div>
+    <button class="btn danger" id="acctDelGo" onclick="acctDelConfirm()">Удалить учётную запись</button>
+    <button class="btn" onclick="closeAcctDel()">Отмена</button>
+    <div class="snapinfo" id="acctDelMsg"></div>
   </div>
 </div>
 
@@ -1424,26 +1553,24 @@ function paintUser(u) {
   })();
 })();
 
-// ---------- «Пользователи»: активные сессии + список допущенных ----------
-// Ролей нет: любой, кто может войти, — равноправный администратор. Панель нужна, чтобы
-// видеть, кто сейчас работает, и управлять тем, кому вход разрешён.
-let accessState = null, userDelName = null, sessDelId = null;
+// ---------- панели «Пользователи», «Сессии», «Настройки» ----------
+// Ролей нет: любой, кто может войти, — равноправный администратор, и все три панели ему доступны.
+// Вход в саму админку и есть «права администратора» — отдельный признак админа не нужен.
+let accessState = null, userDelName = null, sessDelId = null, acctDelName = null;
 
+// Показать кнопки панелей после проверки авторизации и решить, нужен ли раздел каталога.
 async function initUsers() {
   let d;
   try {
     const r = await fetch('/api/users');
-    if (r.status === 401) return;                       // не авторизован — кнопку не показываем
+    if (r.status === 401) return;                       // не авторизован — кнопок не показываем
     if (r.ok) d = await r.json();
-    else {
-      // Список допущенных недоступен (каталог не настроен) — сессии всё равно показываем.
-      const rs = await fetch('/api/users/sessions');
-      if (rs.ok) { $('accessSection').hidden = true; $('usersBtn').hidden = false; }
-      return;
-    }
-  } catch { return; }                                   // сеть/сервер — без кнопки
-  if (!d || !d.catalog) $('accessSection').hidden = true;   // local-режим: списка допущенных нет
+    else d = null;
+  } catch { return; }                                   // сеть/сервер — без кнопок
+  if (!d || !d.catalog) $('accessSection').hidden = true;   // каталог не настроен: раздел допущенных скрыт
   $('usersBtn').hidden = false;
+  $('sessionsBtn').hidden = false;
+  $('settingsBtn').hidden = false;
 }
 
 function accessModeText(info) {
@@ -1454,11 +1581,93 @@ function accessModeText(info) {
 
 async function openUsers() {
   $('usersModal').style.display = 'flex';
-  $('accessMsg').textContent = '';
-  await loadSessions();
+  $('acctMsg').textContent = ''; $('accessMsg').textContent = '';
+  await loadAccounts();
   if (!$('accessSection').hidden) { await loadUsers(); const f = $('accessLogin'); if (f) f.focus(); }
+  else { const f = $('acctLogin'); if (f) f.focus(); }
 }
 function closeUsers() { $('usersModal').style.display = 'none'; }
+
+// ---------- учётные записи (логин + пароль, заведённые здесь) ----------
+function fmtDate(t) { if (!t) return ''; try { return new Date(t).toLocaleDateString('ru-RU'); } catch { return ''; } }
+
+async function loadAccounts() {
+  const box = $('acctList');
+  let d;
+  try { d = await api('/api/accounts'); } catch { box.innerHTML = '<div class="snapinfo">Не удалось получить список.</div>'; return; }
+  const rows = [];
+  if (d.builtin) {
+    rows.push(`
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #eef1f5">
+        <div style="flex:1;min-width:0"><b>${esc(d.builtin.username)}</b>
+          <span class="snapinfo" style="margin-left:6px">встроенная</span>
+          <div style="font-size:12px;color:#777">Пароль задаётся в .env (аварийный вход) — удалить отсюда нельзя</div>
+        </div>
+      </div>`);
+  }
+  for (const a of (d.accounts || [])) {
+    rows.push(`
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #eef1f5">
+        <div style="flex:1;min-width:0"><b>${esc(a.username)}</b>${a.displayName ? ` <span style="color:#555">— ${esc(a.displayName)}</span>` : ''}
+          ${a.note ? `<div style="font-size:12px;color:#777">${esc(a.note)}</div>` : ''}
+          <div style="font-size:12px;color:#999">создана${a.createdAt ? ' ' + esc(fmtDate(a.createdAt)) : ''}${a.createdBy ? ' · ' + esc(a.createdBy) : ''}</div>
+        </div>
+        <button class="btn danger" style="flex:none" onclick="askAcctDel('${esc(a.username)}')">Удалить</button>
+      </div>`);
+  }
+  box.innerHTML = rows.join('') || '<div class="snapinfo" style="padding:8px 0">Записей нет — войти может только встроенная учётка.</div>';
+}
+
+async function saveAccount() {
+  const login = ($('acctLogin').value || '').trim();
+  const pass = $('acctPass').value || '';
+  const btn = $('acctAddBtn');
+  if (!login) { toast('Укажите логин', 'error'); return; }
+  if (!pass) { toast('Укажите пароль', 'error'); return; }
+  btn.disabled = true; $('acctMsg').textContent = 'Сохраняю…';
+  try {
+    const r = await fetch('/api/accounts', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: login, password: pass, displayName: ($('acctName').value || '').trim(), note: ($('acctNote').value || '').trim() })
+    });
+    const d = await r.json();
+    if (r.status === 401) { location.reload(); return; }
+    if (!d.success) { $('acctMsg').textContent = ''; toast(d.message || 'Не удалось сохранить', 'error'); return; }
+    $('acctLogin').value = ''; $('acctPass').value = ''; $('acctName').value = ''; $('acctNote').value = ''; $('acctMsg').textContent = '';
+    toast(d.created ? 'Учётная запись создана: ' + login : 'Пароль обновлён: ' + login);
+    await loadAccounts();
+    $('acctLogin').focus();
+  } catch {
+    $('acctMsg').textContent = ''; toast('Ошибка сети', 'error');
+  } finally { btn.disabled = false; }
+}
+
+function askAcctDel(name) { acctDelName = name; $('acctDelName').textContent = name; $('acctDelPass').value = ''; $('acctDelMsg').textContent = ''; $('acctDelModal').style.display = 'flex'; $('acctDelPass').focus(); }
+function closeAcctDel() { $('acctDelModal').style.display = 'none'; acctDelName = null; }
+async function acctDelConfirm() {
+  if (!acctDelName) return;
+  const go = $('acctDelGo'); go.disabled = true;
+  try {
+    const r = await fetch('/api/accounts/delete', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: acctDelName, password: $('acctDelPass').value })
+    });
+    const d = await r.json();
+    if (r.status === 401) { location.reload(); return; }
+    if (!d.success) { $('acctDelMsg').textContent = d.message || 'Не удалось удалить'; return; }
+    toast('Учётная запись удалена: ' + acctDelName);
+    closeAcctDel();
+    await loadAccounts();
+  } catch { $('acctDelMsg').textContent = 'Ошибка сети'; }
+  finally { go.disabled = false; }
+}
+
+// ---------- панель «Сессии» (кто сейчас работает) ----------
+async function openSessions() {
+  $('sessModal').style.display = 'flex';
+  await loadSessions();
+}
+function closeSessions() { $('sessModal').style.display = 'none'; }
 
 // Активные сессии: кто, откуда, когда вошёл. «Текущая» помечается, её завершить нельзя.
 const fmtTime = t => { if (!t) return ''; const d = new Date(t); return d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); };
@@ -1574,12 +1783,115 @@ async function sessDelConfirm() {
   finally { go.disabled = false; }
 }
 
+// ---------- панель «Настройки»: подключение к каталогу FreeIPA ----------
+// Задаём всё то, что раньше было только в .env. Значения из панели перекрывают .env;
+// кнопка «Сбросить» возвращает к .env. Пароль сервисной учётки наружу не приходит —
+// только пометка «задан».
+const SET_FIELDS = ['setMode', 'setEnabled', 'setUrl', 'setScheme', 'setHost', 'setPort', 'setBaseDn', 'setUserBaseDn', 'setBindDn', 'setFilter', 'setGroup', 'setStartTls', 'setTlsStrict'];
+
+async function openSettings() {
+  $('settingsModal').style.display = 'flex';
+  $('setMsg').textContent = '';
+  await loadSettings();
+}
+function closeSettings() { $('settingsModal').style.display = 'none'; }
+
+function fillSettings(d) {
+  $('setMode').value = d.mode || 'local';
+  $('setEnabled').checked = !!d.enabled;
+  $('setUrl').value = d.url || '';
+  $('setScheme').value = d.scheme || '';
+  $('setHost').value = d.host || '';
+  $('setPort').value = d.port || '';
+  $('setBaseDn').value = d.baseDn || '';
+  $('setUserBaseDn').value = d.userBaseDn || '';
+  $('setBindDn').value = d.bindDn || '';
+  $('setFilter').value = d.userFilter || '';
+  $('setGroup').value = d.requireGroup || '';
+  $('setStartTls').checked = !!d.startTLS;
+  $('setTlsStrict').checked = d.tlsRejectUnauthorized !== false;
+  $('setBindPass').value = '';
+  const state = d.bindPasswordSet
+    ? (d.bindPasswordFromEnv ? 'Пароль берётся из .env — здесь можно задать другой.' : 'Пароль задан и сохранён.')
+    : 'Пароль не задан — поиск пойдёт анонимно.';
+  $('setBindPassState').textContent = state;
+
+  const MODE_LABEL = { local: 'только локальные учётные записи', freeipa: 'только каталог FreeIPA', both: 'каталог + аварийный локальный вход' };
+  const parts = [];
+  parts.push('Способы входа: ' + (MODE_LABEL[d.mode] || d.mode || 'local'));
+  parts.push(d.enabled ? 'каталог включён' : 'каталог выключен');
+  if (d.active) parts.push(`подключение: ${d.urlEffective || ''}`);
+  else if (d.enabled && (d.mode === 'freeipa' || d.mode === 'both')) parts.push('ещё не активно — проверьте поля подключения');
+  if (d.overrides) parts.push(`полей из панели: ${d.overrides}`);
+  $('setState').textContent = parts.join(' · ');
+}
+
+async function loadSettings() {
+  try {
+    const d = await api('/api/settings/freeipa');
+    fillSettings(d);
+  } catch { toast('Не удалось получить настройки', 'error'); }
+}
+
+function settingsBody() {
+  return {
+    mode: $('setMode').value,
+    enabled: $('setEnabled').checked,
+    url: ($('setUrl').value || '').trim(),
+    scheme: ($('setScheme').value || '').trim(),
+    host: ($('setHost').value || '').trim(),
+    port: ($('setPort').value || '').trim(),
+    baseDn: ($('setBaseDn').value || '').trim(),
+    userBaseDn: ($('setUserBaseDn').value || '').trim(),
+    bindDn: ($('setBindDn').value || '').trim(),
+    userFilter: ($('setFilter').value || '').trim(),
+    requireGroup: ($('setGroup').value || '').trim(),
+    startTLS: $('setStartTls').checked,
+    tlsRejectUnauthorized: $('setTlsStrict').checked,
+    bindPassword: $('setBindPass').value || '',
+  };
+}
+
+async function saveSettings() {
+  const btn = $('setSaveBtn'); btn.disabled = true; $('setMsg').textContent = 'Сохраняю…';
+  try {
+    const r = await fetch('/api/settings/freeipa', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settingsBody())
+    });
+    const d = await r.json();
+    if (r.status === 401) { location.reload(); return; }
+    if (!d.success) { $('setMsg').textContent = ''; toast(d.message || 'Не удалось сохранить', 'error'); return; }
+    $('setMsg').textContent = '';
+    fillSettings(d);
+    if (d.error) toast(d.error, 'error'); else toast('Настройки сохранены');
+    await initUsers();               // раздел «допущенные» мог появиться/исчезнуть
+  } catch {
+    $('setMsg').textContent = ''; toast('Ошибка сети', 'error');
+  } finally { btn.disabled = false; }
+}
+
+async function resetSettings() {
+  if (!confirm('Сбросить настройки каталога к значениям из .env?')) return;
+  try {
+    const r = await fetch('/api/settings/freeipa/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const d = await r.json();
+    if (r.status === 401) { location.reload(); return; }
+    if (!d.success) { toast(d.message || 'Не удалось сбросить', 'error'); return; }
+    fillSettings(d);
+    toast('Настройки сброшены к .env');
+    await initUsers();
+  } catch { toast('Ошибка сети', 'error'); }
+}
+
 // ---------- доступность модалок: Escape и клик по затемнению ----------
 const MODALS = [
   { id: 'delModal', close: () => closeDel() },
   { id: 'regenModal', close: () => closeRegen() },
   { id: 'usersModal', close: () => closeUsers() },
+  { id: 'sessModal', close: () => closeSessions() },
+  { id: 'settingsModal', close: () => closeSettings() },
   { id: 'userDelModal', close: () => closeUserDel() },
+  { id: 'acctDelModal', close: () => closeAcctDel() },
   { id: 'sessDelModal', close: () => closeSessDel() },
   { id: 'modal', close: () => closeModal() }
 ];

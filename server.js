@@ -13,34 +13,67 @@ const snapshot = require('./snapshot');
 const deploy = require('./deploy');
 const screens = require('./screens');
 const users = require('./users');
+const accounts = require('./accounts');
+const settings = require('./settings');
 const { buildMatcher } = require('./netguard');
 
 const PORT = process.env.PORT || 3000;
+
+// Все изменяемые данные (плейлисты, картинки, настройки) лежат в STORAGE_DIR — в контейнере это том /storage.
+// Определяем здесь, до авторизации: из DATA читаются настройки каталога и локальные учётки.
+const STORAGE = process.env.STORAGE_DIR || __dirname;
+const DATA = path.join(STORAGE, 'data');
+fs.mkdirSync(DATA, { recursive: true });
+const SETTINGS_FILE = path.join(DATA, 'settings.json');   // настройки каталога, заданные из панели (перекрывают .env)
+const ACCOUNTS_FILE = path.join(DATA, 'accounts.json');   // локальные учётные записи (только хэши паролей)
 // ---------- аутентификация админки ----------
-// Два источника входа:
-//   1) локальная учётка администратора — ADMIN_PASSWORD_HASH (рекомендуется) или ADMIN_PASSWORD;
-//   2) каталог FreeIPA по LDAP (см. freeipa.js), включается FREEIPA_ENABLED=true.
-// Режим выбирает AUTH_MODE: local | freeipa | both. По умолчанию freeipa, если он включён, иначе local.
+// Три источника входа:
+//   1) встроенная учётная запись администратора — ADMIN_PASSWORD_HASH (рекомендуется) или ADMIN_PASSWORD;
+//   2) каталог FreeIPA по LDAP (см. freeipa.js), включается FREEIPA_ENABLED=true;
+//   3) локальные учётные записи, заведённые из панели «Пользователи» (accounts.js, data/accounts.json).
+// Режим AUTH_MODE (local | freeipa | both) задаёт, участвуют ли источники 1 и 2; локальные учётки
+// из панели работают в любом режиме — их админ заводит осознанно. По умолчанию freeipa, если он включён, иначе local.
 const PROD = process.env.NODE_ENV === 'production';
-let PASSWORD_HASH, PASSWORD_PLAIN, ADMIN_NETS, ADMIN_USER, IPA, AUTH_MODE;
+let PASSWORD_HASH, PASSWORD_PLAIN, ADMIN_NETS, ADMIN_USER;
 try {
     PASSWORD_HASH = auth.readEnvOrFile('ADMIN_PASSWORD_HASH', true);
     PASSWORD_PLAIN = auth.readEnvOrFile('ADMIN_PASSWORD');
     ADMIN_NETS = buildMatcher(process.env.ADMIN_ALLOWED_NETS);
-    IPA = freeipa.loadConfig();
 } catch (e) { console.error(e.message); process.exit(1); }
 
 ADMIN_USER = (process.env.ADMIN_USER || 'admin').trim() || 'admin';
-AUTH_MODE = (process.env.AUTH_MODE || (IPA ? 'freeipa' : 'local')).trim().toLowerCase();
-if (!['local', 'freeipa', 'both'].includes(AUTH_MODE)) {
-    console.error('AUTH_MODE: допустимы local | freeipa | both'); process.exit(1);
+
+// Действующая конфигурация авторизации. Пересчитывается при старте и при сохранении
+// настроек каталога из панели (data/settings.json). Значения из панели перекрывают .env.
+let IPA = null, AUTH_MODE = 'local', LOCAL_LOGIN = false, IPA_LOGIN = false;
+function applyAuthConfig({ strict = false } = {}) {
+    let ipa = null;
+    try { ipa = freeipa.loadConfig(settings.mergedEnv(settingsReg)); }
+    catch (e) {
+        // Настройки из панели могут быть неполными. Если при этом .env даёт рабочую конфигурацию —
+        // работаем по .env и предупреждаем, а не роняем сервер (иначе плохой settings.json «кирпичил» бы админку).
+        try { ipa = freeipa.loadConfig(process.env); console.warn(`Настройки каталога из панели не применились (${e.message}) — работаю по .env`); }
+        catch { if (strict) { console.error(e.message); process.exit(1); } console.warn('FreeIPA недоступен: ' + e.message); ipa = null; }
+    }
+    IPA = ipa;
+    // AUTH_MODE может задаваться и в .env, и в настройках панели (последние приоритетнее):
+    // так админ включает вход через каталог, не редактируя файл на сервере.
+    const env = settings.mergedEnv(settingsReg);
+    const mode = (env.AUTH_MODE || (IPA ? 'freeipa' : 'local')).trim().toLowerCase();
+    if (!['local', 'freeipa', 'both'].includes(mode)) {
+        if (strict) { console.error('AUTH_MODE: допустимы local | freeipa | both'); process.exit(1); }
+        console.warn(`AUTH_MODE «${mode}» недопустим — использую local`);
+    }
+    AUTH_MODE = ['local', 'freeipa', 'both'].includes(mode) ? mode : 'local';
+    LOCAL_LOGIN = AUTH_MODE === 'local' || AUTH_MODE === 'both';
+    // Каталог включён, но не настроен: на старте это ошибка, во время работы — просто выключаем вход через каталог.
+    if ((AUTH_MODE === 'freeipa' || AUTH_MODE === 'both') && !IPA) {
+        const msg = 'AUTH_MODE=' + AUTH_MODE + ', но FreeIPA не настроен: задайте FREEIPA_ENABLED=true и параметры FREEIPA_* (см. .env.example)';
+        if (strict) { console.error(msg); process.exit(1); }
+        console.warn(msg + ' — вход через каталог выключен до исправления настроек');
+    }
+    IPA_LOGIN = (AUTH_MODE === 'freeipa' || AUTH_MODE === 'both') && !!IPA;
 }
-if ((AUTH_MODE === 'freeipa' || AUTH_MODE === 'both') && !IPA) {
-    console.error('AUTH_MODE=' + AUTH_MODE + ', но FreeIPA не настроен: задайте FREEIPA_ENABLED=true и параметры FREEIPA_* (см. .env.example)');
-    process.exit(1);
-}
-const LOCAL_LOGIN = AUTH_MODE === 'local' || AUTH_MODE === 'both';
-const IPA_LOGIN = (AUTH_MODE === 'freeipa' || AUTH_MODE === 'both') && !!IPA;
 
 // Кто может входить через каталог. В каталоге FreeIPA, кроме «наших», обычно есть и
 // обычные сотрудники — поэтому вход ограничиваем списком допущенных (data/users.json).
@@ -56,6 +89,16 @@ if (PASSWORD_HASH && !auth.isValidHash(PASSWORD_HASH)) {
     console.error('ADMIN_PASSWORD_HASH имеет неверный формат. Создайте новый: npm run hash-password');
     process.exit(1);
 }
+
+// Реестры, читаемые из DATA: настройки каталога и локальные учётки. Затем — расчёт действующей
+// конфигурации авторизации (она зависит от LOCAL_LOGIN, поэтому до проверок пароля ниже).
+let settingsReg = settings.load(SETTINGS_FILE);
+let accountsReg = accounts.loadRegistry(ACCOUNTS_FILE);
+if (!fs.existsSync(ACCOUNTS_FILE)) accounts.save(ACCOUNTS_FILE, accountsReg);   // завести файл сразу
+function reloadAccounts() { accountsReg = accounts.loadRegistry(ACCOUNTS_FILE); }
+function reloadSettings() { settingsReg = settings.load(SETTINGS_FILE); applyAuthConfig(); }
+applyAuthConfig({ strict: true });
+
 // Локальный пароль нужен только если он реально участвует в проверке.
 if (LOCAL_LOGIN && !PASSWORD_HASH && !PASSWORD_PLAIN) {
     if (PROD) { console.error('Задайте ADMIN_PASSWORD_HASH (рекомендуется) или ADMIN_PASSWORD (см. .env.example)'); process.exit(1); }
@@ -73,10 +116,6 @@ async function checkLocalPassword(input) {
 // data/screens.json (см. screens.js). Имена можно менять из админки, ссылки плееров — по токену.
 const SEED_SCREENS = (process.env.SCREENS || 'left,right,big_wall').split(',').map(s => s.trim()).filter(s => /^[a-z0-9_-]+$/i.test(s));
 const KEEP_MS = 9 * 30 * 24 * 3600 * 1000;                        // хранить 9 месяцев после окончания показа
-
-// Все изменяемые данные (плейлисты и картинки) лежат в STORAGE_DIR — в контейнере это отдельный том /storage
-const STORAGE = process.env.STORAGE_DIR || __dirname;
-const DATA = path.join(STORAGE, 'data');
 
 // Секрет подписи cookie сессии. Задайте SESSION_SECRET для нескольких копий сервера за
 // балансировщиком; иначе он хранится в файле на томе и переживает перезапуск контейнера
@@ -351,6 +390,16 @@ const checkAuth = (req, res, next) => {
 // перезапуск — это было сделано специально, чтобы деплой не выкидывал людей на страницу входа.
 const sessionCred = () => crypto.createHash('sha256')
     .update('signage-session-cred:' + (PASSWORD_HASH || PASSWORD_PLAIN || '')).digest('hex').slice(0, 24);
+// Отпечаток для конкретной сессии. Локальная учётная запись из панели привязана к своему хэшу
+// пароля: смена (или удаление) учётки сразу отзывает её сессии. Остальные — к отпечатку админки.
+function credFor(user) {
+    const u = user || {};
+    if (u.via === 'account') {
+        const rec = accounts.get(accountsReg, u.username);
+        return crypto.createHash('sha256').update('signage-account-cred:' + (rec ? rec.passwordHash : 'removed')).digest('hex').slice(0, 24);
+    }
+    return sessionCred();
+}
 
 // Действительна ли сессия прямо сейчас. Кроме факта входа проверяем две вещи:
 //   1) не сменился ли пароль админки (отпечаток сессии не совпадает с текущим);
@@ -360,9 +409,11 @@ const sessionCred = () => crypto.createHash('sha256')
 // Работает и с объектом сессии запроса, и с записью из хранилища (панель «Пользователи»).
 function sessionValidFor(s) {
     if (!s || !s.authorized) return false;
-    if (s.cred !== sessionCred()) return false;
     const u = s.user || {};
+    if (s.cred !== credFor(u)) return false;
     if (u.via === 'freeipa' && !users.isAllowed(usersReg, u.username, accessMode())) return false;
+    // Локальную учётную запись убрали из панели — её сессия сразу перестаёт действовать.
+    if (u.via === 'account' && !accounts.has(accountsReg, u.username)) return false;
     return true;
 }
 const sessionValid = req => sessionValidFor(req.session);
@@ -382,12 +433,27 @@ function bumpFail(key) {
     fails.set(key, rec);
 }
 
+// Проверка пароля локальной учётной записи из панели (accounts.js). Пароль здесь никогда
+// не равен встроенному ADMIN_USER — он проверяется отдельно, в checkCredentials.
+async function checkAccountPassword(username, password) {
+    const rec = accounts.get(accountsReg, username);
+    if (!rec || typeof password !== 'string' || !password) return null;
+    try { return (await auth.verifyPassword(password, rec.passwordHash)) ? rec : null; }
+    catch (e) { console.error('Ошибка проверки пароля учётной записи:', e.message); return null; }
+}
+
 // Проверяет логин/пароль по выбранному источнику. Возвращает { ok, user?, reason? }.
-// Сетевые/серверные ошибки FreeIPA не «пускают» и не «валидят» вход — они лишь логируются.
-// В режиме both локальная учётка ADMIN_USER — аварийный вход: она проверяется, когда FreeIPA
-// не пустил (нет такого пользователя, неверный пароль или каталог недоступен).
+// Порядок: локальные учётки из панели (они заведены осознанно и пароль у них свой), затем каталог,
+// затем встроенная аварийная учётка ADMIN_USER. Сетевые/серверные ошибки FreeIPA не «пускают»
+// и не «валидят» вход — они лишь логируются.
 async function checkCredentials(username, password) {
     const login = typeof username === 'string' && username.trim() ? username.trim() : ADMIN_USER;
+    const low = login.toLowerCase();
+
+    // 1) Локальная учётная запись из панели (accounts.json). Работает в любом AUTH_MODE.
+    const acc = await checkAccountPassword(login, password);
+    if (acc) return { ok: true, user: { username: acc.username, displayName: acc.displayName || acc.username }, via: 'account' };
+
     let accessDenied = false;                                     // в каталоге пустили, но нет в списке допущенных
     if (IPA_LOGIN) {
         try {
@@ -413,7 +479,8 @@ async function checkCredentials(username, password) {
                 : { ok: false, reason: 'Неверный логин или пароль' };
         }
     }
-    if (LOCAL_LOGIN && login.toLowerCase() === ADMIN_USER.toLowerCase()) {
+    // 2) Встроенная учётная запись ADMIN_USER (аварийный вход) — только если это её логин.
+    if (LOCAL_LOGIN && low === ADMIN_USER.toLowerCase()) {
         let ok = false;
         try { ok = await checkLocalPassword(password); } catch (e) { console.error('Ошибка проверки пароля:', e.message); }
         if (ok) return { ok: true, user: { username: ADMIN_USER, displayName: ADMIN_USER }, via: 'local' };
@@ -436,9 +503,11 @@ app.post('/api/login', async (req, res) => {
     req.session.regenerate(err => {
         if (err) { console.error('Не удалось пересоздать сессию:', err.message); return res.status(500).json({ success: false, message: 'Ошибка входа' }); }
         req.session.authorized = true;
-        req.session.cred = sessionCred();                         // привязка к текущему паролю: смена пароля отзывает сессию
+        r.user.via = r.via;                                       // источник входа: freeipa | account | local
         req.session.user = r.user;                                // для отображения в админке/логах
-        req.session.user.via = r.via;                             // источник входа: freeipa | local
+        // Отпечаток считаем ПОСЛЕ простановки via: для учётной записи из панели он привязан
+        // к её хэшу пароля, для остальных — к отпечатку админки.
+        req.session.cred = credFor(req.session.user);
         // Метаданные для панели «Пользователи»: видно, кто и откуда сейчас работает.
         req.session.meta = { loginAt: Date.now(), ip: req.ip, ua: String(req.get('user-agent') || '').slice(0, 200) };
         console.log(`Вход разрешён: ${r.user.username} (${r.via}) с ${req.ip}`);
@@ -454,6 +523,12 @@ async function confirmPassword(req, password) {
     const u = req.session.user || {};
     const login = typeof u.username === 'string' && u.username ? u.username : ADMIN_USER;
     if (typeof password !== 'string' || !password) return false;
+    // Локальная учётная запись из панели: подтверждение её же паролем.
+    if (u.via === 'account' || accounts.has(accountsReg, login)) {
+        if (await checkAccountPassword(login, password)) return true;
+        // Если каталог/аварийный вход тоже доступны, не выходим сразу — пусть проверятся и они.
+        if (!IPA_LOGIN && !(LOCAL_LOGIN && login.toLowerCase() === ADMIN_USER.toLowerCase())) return false;
+    }
     if (IPA_LOGIN) {
         try {
             const r = await freeipa.authenticate(IPA, login, password);
@@ -621,12 +696,145 @@ app.post('/api/users/delete', checkAuth, async (req, res) => {
     res.json({ success: true, ...accessInfo() });
 });
 
+// ---------- локальные учётные записи админки (создание/удаление из панели) ----------
+// Это вход по учётной записи, заведённой прямо в интерфейсе (логин + пароль). Пароль хранится
+// только хэшем (scrypt). Все такие учётки — равноправные администраторы. Встроенную ADMIN_USER
+// из .env создать/удалить отсюда нельзя: это аварийный вход, он всегда остаётся — чтобы не
+// остаться без входа, если настройки каталога окажутся нерабочими.
+const publicAccount = a => ({ username: a.username, displayName: a.displayName || '', note: a.note || '', createdAt: a.createdAt || null, createdBy: a.createdBy || null });
+const builtinAccount = () => ({ username: ADMIN_USER, displayName: (AUTH_MODE === 'local' || AUTH_MODE === 'both') ? `${ADMIN_USER} (встроенная)` : ADMIN_USER, builtin: true });
+
+app.get('/api/accounts', checkAuth, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({
+        success: true,
+        builtin: builtinAccount(),
+        accounts: accountsReg.accounts.map(publicAccount)
+    });
+});
+
+// Создать (или сменить пароль) локальной учётной записи. Тело: { username, password, displayName?, note? }.
+app.post('/api/accounts', checkAuth, async (req, res) => {
+    const b = req.body || {};
+    const username = accounts.clean(b.username);
+    if (!accounts.isValid(username)) {
+        return res.status(400).json({ success: false, message: 'Недопустимый логин: буквы, цифры, точка, дефис, подчёркивание (до 64 символов)' });
+    }
+    if (username === ADMIN_USER.toLowerCase()) {
+        return res.status(400).json({ success: false, message: `«${ADMIN_USER}» — встроенная учётная запись, её пароль задаётся в .env (ADMIN_PASSWORD_HASH)` });
+    }
+    const pwProblem = accounts.passwordProblem(b.password);
+    if (pwProblem) return res.status(400).json({ success: false, message: pwProblem });
+
+    const existed = accounts.has(accountsReg, username);
+    let passwordHash;
+    try { passwordHash = await auth.hashPassword(b.password); }
+    catch (e) { console.error('Ошибка хэширования пароля:', e.message); return res.status(500).json({ success: false, message: 'Внутренняя ошибка' }); }
+
+    const prev = accounts.get(accountsReg, username);
+    const rec = {
+        username,
+        displayName: accounts.clip(b.displayName, 80) || (prev && prev.displayName) || '',
+        passwordHash,
+        note: accounts.clip(b.note, 120) || (prev && prev.note) || '',
+        createdAt: (prev && prev.createdAt) || new Date().toISOString(),
+        createdBy: (prev && prev.createdBy) || ((req.session.user && req.session.user.username) || ADMIN_USER),
+    };
+    accountsReg = accounts.upsert(accountsReg, rec);
+    accounts.save(ACCOUNTS_FILE, accountsReg);
+    reloadAccounts();
+    console.log(`Локальная учётная запись: ${existed ? 'смена пароля' : 'создана'} «${username}» (${rec.createdBy})`);
+    res.json({ success: true, account: publicAccount(accounts.get(accountsReg, username) || rec), created: !existed });
+});
+
+// Удалить локальную учётную запись. Тело: { username, password } — опасное действие,
+// подтверждаем паролем текущего администратора. Сессии удалённого отзываются сразу (credFor).
+app.post('/api/accounts/delete', checkAuth, async (req, res) => {
+    const b = req.body || {};
+    const username = accounts.clean(b.username);
+    const rec = accounts.get(accountsReg, username);
+    if (!rec) return res.status(404).json({ success: false, message: 'Учётная запись не найдена' });
+    const me = req.session.user || {};
+    if (me.via === 'account' && accounts.clean(me.username) === username) {
+        return res.status(400).json({ success: false, message: 'Это ваша учётная запись — удалить её из своей же сессии нельзя' });
+    }
+    const key = `acc-del|${req.ip}`;
+    if (throttled(key)) return res.status(429).json({ success: false, message: 'Слишком много попыток, подождите' });
+    if (!(await confirmPassword(req, b.password))) {
+        bumpFail(key);
+        console.warn(`Отказ удаления учётной записи «${username}»: неверный пароль (${req.ip})`);
+        return res.status(403).json({ success: false, message: 'Неверный пароль' });
+    }
+    fails.delete(key);
+    accountsReg = accounts.remove(accountsReg, username);
+    accounts.save(ACCOUNTS_FILE, accountsReg);
+    reloadAccounts();
+    console.log(`Локальная учётная запись удалена: «${username}»`);
+    res.json({ success: true });
+});
+
+// ---------- настройки каталога FreeIPA (из панели, только админ) ----------
+// Показываем действующие значения; секрет сервисной учётки — только признаком. Сами настройки
+// перекрывают .env; сброс возвращает «как в .env». После сохранения конфигурация пересчитывается.
+function settingsPublic() {
+    const pub = settings.toPublic(settingsReg, process.env);
+    pub.mode = pub.mode || AUTH_MODE;         // заданный режим (из панели или .env)
+    pub.activeMode = AUTH_MODE;               // что действует сейчас
+    pub.active = !!IPA_LOGIN;                 // получилось ли включить вход через каталог прямо сейчас
+    pub.urlEffective = IPA ? IPA.url : '';
+    pub.error = '';
+    return pub;
+}
+
+app.get('/api/settings/freeipa', checkAuth, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, ...settingsPublic() });
+});
+
+app.post('/api/settings/freeipa', checkAuth, async (req, res) => {
+    const b = req.body || {};
+    const patch = settings.parseInput(b);
+    const next = { ...settingsReg, freeipa: { ...(settingsReg.freeipa || {}), ...patch } };
+    // Пароль сервисной учётки: пустая строка = «не менять». `bindPasswordClear: true` — удалить.
+    if (typeof b.bindPassword === 'string' && b.bindPassword !== '') next.freeipa.bindPassword = b.bindPassword;
+    if (b.bindPasswordClear === true) delete next.freeipa.bindPassword;
+    // Пустые значения не храним: они означают «взять из .env».
+    for (const k of Object.keys(next.freeipa)) if (next.freeipa[k] === '' || next.freeipa[k] === null) delete next.freeipa[k];
+
+    // Проверяем конфигурацию только если каталог действительно нужен (режим freeipa/both или включён):
+    // иначе сохранили бы «кирпич». В режиме local пустые поля каталога — это норма.
+    const merged = settings.mergedEnv(next);
+    const mode = String(merged.AUTH_MODE || '').trim().toLowerCase() || (merged.FREEIPA_ENABLED ? 'freeipa' : 'local');
+    if (['freeipa', 'both'].includes(mode) || settings.asBool(merged.FREEIPA_ENABLED)) {
+        try { freeipa.loadConfig(merged); }
+        catch (e) { return res.status(400).json({ success: false, message: e.message }); }
+    }
+
+    settingsReg = next;
+    settings.save(SETTINGS_FILE, settingsReg);
+    applyAuthConfig();
+    console.log(`Настройки каталога сохранены (${(req.session.user && req.session.user.username) || ADMIN_USER}); вход через каталог — ${IPA_LOGIN ? 'включён' : 'выключен'}`);
+    const pub = settingsPublic();
+    if (pub.enabled && !pub.active) pub.error = 'Настройки сохранены, но вход через каталог не включится: проверьте AUTH_MODE и обязательные поля.';
+    res.json({ success: true, ...pub });
+});
+
+// Сброс настроек панели: снова действует только .env.
+app.post('/api/settings/freeipa/reset', checkAuth, (req, res) => {
+    settingsReg = { freeipa: {} };
+    settings.save(SETTINGS_FILE, settingsReg);
+    applyAuthConfig();
+    console.log(`Настройки каталога сброшены к .env (${(req.session.user && req.session.user.username) || ADMIN_USER})`);
+    res.json({ success: true, ...settingsPublic() });
+});
+
 // Страница входа. Логин/подсказка отрисовываются по режиму AUTH_MODE прямо в HTML,
 // а не только через /api/auth: иначе медленный/неудачный запрос оставлял форму без поля логина.
 function renderLogin() {
     const file = path.join(PUBLIC, 'login.html');
     const hint = AUTH_MODE === 'freeipa' ? 'Вход по учётной записи FreeIPA'
-        : AUTH_MODE === 'both' ? 'FreeIPA или локальный администратор' : '';
+        : AUTH_MODE === 'both' ? 'FreeIPA или локальный администратор'
+        : accountsReg.accounts.length ? 'Вход по учётной записи' : '';
     // Поле логина показываем всегда. В local-режиме учётка одна — подставляем ADMIN_USER,
     // в freeipa/both логин вводит пользователь (поле пустое).
     const user = LOCAL_LOGIN && AUTH_MODE === 'local' ? ADMIN_USER : '';
