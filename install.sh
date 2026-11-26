@@ -176,9 +176,14 @@ if [[ -n "$PORT" ]]; then set_env PORT "$PORT"; fi
 # --- прочие настройки из окружения ------------------------------------------
 [[ -n "${ADMIN_USER:-}" ]]         && set_env ADMIN_USER "$ADMIN_USER"
 [[ -n "${AUTH_MODE:-}" ]]          && set_env AUTH_MODE "$AUTH_MODE"
+# freeipa-адрес частями (если задан FREEIPA_URL, он приоритетен и части не нужны)
+[[ -n "${FREEIPA_SCHEME:-}" ]]    && set_env FREEIPA_SCHEME "$FREEIPA_SCHEME"
+[[ -n "${FREEIPA_HOST:-}" ]]      && set_env FREEIPA_HOST "$FREEIPA_HOST"
+[[ -n "${FREEIPA_PORT:-}" ]]      && set_env FREEIPA_PORT "$FREEIPA_PORT"
 [[ -n "${ADMIN_ALLOWED_NETS:-}" ]] && set_env ADMIN_ALLOWED_NETS "$ADMIN_ALLOWED_NETS"
 [[ -n "${TZ:-}" ]]                 && set_env TZ "$TZ"
-for k in FREEIPA_ENABLED FREEIPA_URL FREEIPA_BASE_DN FREEIPA_USER_BASE_DN \
+for k in FREEIPA_ENABLED FREEIPA_URL FREEIPA_SCHEME FREEIPA_HOST FREEIPA_PORT \
+         FREEIPA_BASE_DN FREEIPA_USER_BASE_DN \
          FREEIPA_BIND_DN FREEIPA_BIND_PASSWORD FREEIPA_REQUIRE_GROUP FREEIPA_ACCESS_MODE \
          DEPLOY_ENABLED DEPLOY_AGENT_URL DEPLOY_AGENT_TOKEN \
          SCREENS PLAYER_DWS_USER PLAYER_DWS_PASSWORD; do

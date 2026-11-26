@@ -702,7 +702,7 @@ details.snapdet > summary { color: var(--accent); }
   <h1>Управление экранами</h1>
   <div>
     <button class="btn deploy" id="deployBtn" hidden onclick="doDeploy()">⬆ Обновить систему</button>
-    <button class="btn" id="accessBtn" hidden onclick="openAccess()">🔑 Доступ</button>
+    <button class="btn" id="usersBtn" hidden onclick="openUsers()">👥 Пользователи</button>
     <button class="btn success" onclick="addScreen()">＋ Экран</button>
     <div class="user" id="userBox" hidden>
       <button class="user-btn" id="userBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="userMenu" onclick="toggleUserMenu(event)">
@@ -723,27 +723,54 @@ details.snapdet > summary { color: var(--accent); }
 </div>
 <div class="screens" id="screens">Загрузка…</div>
 
-<div class="modal" id="accessModal" role="dialog" aria-modal="true" aria-labelledby="accessTitle">
-  <div class="modal-content" style="width:520px">
-    <h3 id="accessTitle">🔑 Кто может входить</h3>
-    <p style="font-size:13px;color:#555;margin:0 0 12px">
-      Вход по доменной учётной записи. Список ниже решает, кого пускать: пока он не пуст,
-      остальные сотрудники каталога войти не смогут. Пароли здесь не хранятся — пароль
-      по-прежнему проверяется в каталоге.
+<div class="modal" id="usersModal" role="dialog" aria-modal="true" aria-labelledby="usersTitle">
+  <div class="modal-content" style="width:560px">
+    <h3 id="usersTitle">👥 Пользователи</h3>
+
+    <h4 style="margin:0 0 6px;font-size:var(--fs-m)">Сейчас работают</h4>
+    <p style="font-size:12px;color:#777;margin:0 0 8px">
+      Активные входы в панель. Сессия живёт до выхода или 12 часов; перезапуск сервера она переживает.
+      Можно завершить чужую сессию (например, потерян ноутбук).
     </p>
-    <div class="snapinfo" id="accessModeInfo" style="margin-bottom:12px"></div>
-    <div id="accessList"></div>
-    <div class="fg" style="margin-top:14px">
-      <label for="accessLogin">Добавить учётную запись</label>
-      <input type="text" id="accessLogin" autocomplete="off" placeholder="доменный логин, например ivanov" onkeydown="if(event.key==='Enter')addUser()">
+    <div id="sessList"><div class="snapinfo">Загрузка…</div></div>
+
+    <div id="accessSection" style="margin-top:18px">
+      <h4 style="margin:0 0 6px;font-size:var(--fs-m)">Кто может входить</h4>
+      <p style="font-size:12px;color:#777;margin:0 0 8px">
+        Вход по доменной учётной записи. Список решает, кого пускать: пока он не пуст,
+        остальные сотрудники каталога войти не смогут. Пароли здесь не хранятся — пароль
+        по-прежнему проверяется в каталоге. Все из списка — равноправные администраторы.
+      </p>
+      <div class="snapinfo" id="accessModeInfo" style="margin-bottom:10px"></div>
+      <div id="accessList"></div>
+      <div class="fg" style="margin-top:12px">
+        <label for="accessLogin">Добавить учётную запись</label>
+        <input type="text" id="accessLogin" autocomplete="off" placeholder="доменный логин, например ivanov" onkeydown="if(event.key==='Enter')addUser()">
+      </div>
+      <div class="fg">
+        <label for="accessNote">Комментарий (необязательно)</label>
+        <input type="text" id="accessNote" autocomplete="off" maxlength="120" placeholder="например: инженер, 3 этаж">
+      </div>
+      <button class="btn success" id="accessAddBtn" onclick="addUser()">Добавить</button>
+      <div class="snapinfo" id="accessMsg"></div>
     </div>
-    <div class="fg">
-      <label for="accessNote">Комментарий (необязательно)</label>
-      <input type="text" id="accessNote" autocomplete="off" maxlength="120" placeholder="например: инженер, 3 этаж">
-    </div>
-    <button class="btn success" id="accessAddBtn" onclick="addUser()">Добавить</button>
-    <button class="btn" onclick="closeAccess()">Закрыть</button>
-    <div class="snapinfo" id="accessMsg"></div>
+
+    <div style="margin-top:16px"><button class="btn" onclick="closeUsers()">Закрыть</button></div>
+  </div>
+</div>
+
+<div class="modal" id="sessDelModal" role="dialog" aria-modal="true" aria-labelledby="sessDelTitle">
+  <div class="modal-content">
+    <h3 id="sessDelTitle">Завершить сессию?</h3>
+    <p style="font-size:13px;color:#555;margin:0 0 10px">Пользователь: <b id="sessDelName"></b></p>
+    <p style="font-size:13px;color:#c0392b;margin:0 0 10px">
+      Человек сразу выйдет из панели и должен будет войти заново. Пароль не меняется.
+    </p>
+    <div class="fg"><label>Пароль администратора</label>
+      <input type="password" id="sessDelPass" autocomplete="current-password" placeholder="Введите пароль" onkeydown="if(event.key==='Enter')sessDelConfirm()"></div>
+    <button class="btn danger" id="sessDelGo" onclick="sessDelConfirm()">Завершить сессию</button>
+    <button class="btn" onclick="closeSessDel()">Отмена</button>
+    <div class="snapinfo" id="sessDelMsg"></div>
   </div>
 </div>
 
@@ -1397,33 +1424,71 @@ function paintUser(u) {
   })();
 })();
 
-// ---------- доступ: список допущенных учётных записей каталога ----------
-let accessState = null, userDelName = null;
+// ---------- «Пользователи»: активные сессии + список допущенных ----------
+// Ролей нет: любой, кто может войти, — равноправный администратор. Панель нужна, чтобы
+// видеть, кто сейчас работает, и управлять тем, кому вход разрешён.
+let accessState = null, userDelName = null, sessDelId = null;
 
-async function initAccess() {
+async function initUsers() {
   let d;
   try {
     const r = await fetch('/api/users');
-    if (r.status === 400 || r.status === 401) return;   // каталог не настроен / не авторизован — раздел не нужен
-    d = await r.json();
-  } catch { return; }                                   // сеть/сервер — просто без кнопки
-  if (!d || !d.catalog) return;
-  accessState = d;
-  $('accessBtn').hidden = false;
+    if (r.status === 401) return;                       // не авторизован — кнопку не показываем
+    if (r.ok) d = await r.json();
+    else {
+      // Список допущенных недоступен (каталог не настроен) — сессии всё равно показываем.
+      const rs = await fetch('/api/users/sessions');
+      if (rs.ok) { $('accessSection').hidden = true; $('usersBtn').hidden = false; }
+      return;
+    }
+  } catch { return; }                                   // сеть/сервер — без кнопки
+  if (!d || !d.catalog) $('accessSection').hidden = true;   // local-режим: списка допущенных нет
+  $('usersBtn').hidden = false;
 }
 
 function accessModeText(info) {
+  if (!info.catalog) return '';
   if (info.mode === 'list') return `Сейчас пускаем только этих: ${info.count}. Остальные сотрудники каталога войти не могут.`;
   return 'Список пуст — сейчас войти может любой сотрудник каталога. Добавьте первого, и вход остальным закроется.';
 }
 
-async function openAccess() {
-  $('accessModal').style.display = 'flex';
+async function openUsers() {
+  $('usersModal').style.display = 'flex';
   $('accessMsg').textContent = '';
-  await loadUsers();
-  const f = $('accessLogin'); if (f) f.focus();
+  await loadSessions();
+  if (!$('accessSection').hidden) { await loadUsers(); const f = $('accessLogin'); if (f) f.focus(); }
 }
-function closeAccess() { $('accessModal').style.display = 'none'; }
+function closeUsers() { $('usersModal').style.display = 'none'; }
+
+// Активные сессии: кто, откуда, когда вошёл. «Текущая» помечается, её завершить нельзя.
+const fmtTime = t => { if (!t) return ''; const d = new Date(t); return d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); };
+const uaShort = ua => { if (!ua) return ''; const m = String(ua).match(/(Firefox|Edg|Chrome|Safari|curl|Opera)\/?[\d.]*/); return m ? m[0].split('/')[0] : ''; };
+// Строка «откуда и когда». У сессий, созданных до обновления, метаданных нет — так и говорим.
+function sessMeta(x) {
+  const parts = [];
+  if (x.loginAt) parts.push('вход ' + fmtTime(x.loginAt));
+  if (x.ip) parts.push(x.ip);
+  if (uaShort(x.ua)) parts.push(uaShort(x.ua));
+  return parts.length ? parts.join(' · ') : 'вход до обновления (метаданных нет)';
+}
+
+async function loadSessions() {
+  const box = $('sessList');
+  let d;
+  try { d = await api('/api/users/sessions'); } catch { box.innerHTML = '<div class="snapinfo">Не удалось получить список.</div>'; return; }
+  const list = d.sessions || [];
+  if (!list.length) { box.innerHTML = '<div class="snapinfo" style="padding:8px 0">Активных входов нет.</div>'; return; }
+  box.innerHTML = list.map(x => `
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #eef1f5">
+      <div style="flex:1;min-width:0">
+        <b>${esc(x.displayName || x.username)}</b>
+        ${x.via === 'freeipa' ? '<span class="snapinfo" style="margin-left:6px">FreeIPA</span>' : '<span class="snapinfo" style="margin-left:6px">локальная</span>'}
+        ${x.current ? '<span class="snapinfo" style="margin-left:6px">это вы</span>' : ''}
+        <div style="font-size:12px;color:#777">${esc(sessMeta(x))}</div>
+      </div>
+      ${x.current ? '' : `<button class="btn danger" style="flex:none" onclick="askSessDel('${esc(x.id)}','${esc(x.displayName || x.username)}')">Завершить</button>`}
+    </div>`).join('');
+}
 
 async function loadUsers() {
   let d;
@@ -1483,7 +1548,29 @@ async function userDelConfirm() {
     toast('Доступ убран: ' + userDelName);
     closeUserDel();
     await loadUsers();
+    await loadSessions();      // убранный человек сразу помечается недействительным
   } catch { $('userDelMsg').textContent = 'Ошибка сети'; }
+  finally { go.disabled = false; }
+}
+
+// Завершение чужой сессии — подтверждается паролем текущего администратора.
+function askSessDel(id, name) { sessDelId = id; $('sessDelName').textContent = name; $('sessDelPass').value = ''; $('sessDelMsg').textContent = ''; $('sessDelModal').style.display = 'flex'; $('sessDelPass').focus(); }
+function closeSessDel() { $('sessDelModal').style.display = 'none'; sessDelId = null; }
+async function sessDelConfirm() {
+  if (!sessDelId) return;
+  const go = $('sessDelGo'); go.disabled = true;
+  try {
+    const r = await fetch('/api/users/sessions/revoke', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: sessDelId, password: $('sessDelPass').value })
+    });
+    const d = await r.json();
+    if (r.status === 401) { location.reload(); return; }
+    if (!d.success) { $('sessDelMsg').textContent = d.message || 'Не удалось завершить'; return; }
+    toast('Сессия завершена');
+    closeSessDel();
+    await loadSessions();
+  } catch { $('sessDelMsg').textContent = 'Ошибка сети'; }
   finally { go.disabled = false; }
 }
 
@@ -1491,8 +1578,9 @@ async function userDelConfirm() {
 const MODALS = [
   { id: 'delModal', close: () => closeDel() },
   { id: 'regenModal', close: () => closeRegen() },
-  { id: 'accessModal', close: () => closeAccess() },
+  { id: 'usersModal', close: () => closeUsers() },
   { id: 'userDelModal', close: () => closeUserDel() },
+  { id: 'sessDelModal', close: () => closeSessDel() },
   { id: 'modal', close: () => closeModal() }
 ];
 function openModals() { return MODALS.filter(m => $(m.id) && $(m.id).style.display === 'flex'); }
@@ -1714,7 +1802,7 @@ async function delSnap(i, f) {
   await load();
   SCREENS.forEach(i => { loadAddr(i); loadSnaps(i); });
   initDeploy();
-  initAccess();
+  initUsers();
   loadStatus();
   setInterval(load, 10000);
   setInterval(loadStatus, 5000);

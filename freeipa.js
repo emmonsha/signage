@@ -29,14 +29,51 @@ function envOrFile(env, name, trim = false) {
     return v && trim ? String(v).trim() : v;
 }
 
+// Собирает адрес каталога. Приоритет у полного FREEIPA_URL; иначе адрес складывается из
+// FREEIPA_SCHEME / FREEIPA_HOST / FREEIPA_PORT — так удобнее, если каталог слушает
+// на нестандартных портах (свой ldap-порт, не 389/636).
+// Умолчания: ldaps://<host>:636; для ldap:// — :389. Порт из URL учитывается.
+function buildUrl(env) {
+    const url = String(env.FREEIPA_URL || '').trim();
+    if (url) {
+        if (!/^ldaps?:\/\//i.test(url)) throw new Error(`FREEIPA_URL: ожидается ldap:// или ldaps:// (получено "${url}")`);
+        return { url };
+    }
+
+    const host = String(env.FREEIPA_HOST || '').trim();
+    if (!host) return null;                        // ни URL, ни хоста — конфигурация неполна
+    if (/[:\/]/.test(host)) {
+        throw new Error(`FREEIPA_HOST: ожидается имя или IP без схемы и порта (получено "${host}"); порт задайте в FREEIPA_PORT`);
+    }
+
+    const portRaw = String(env.FREEIPA_PORT || '').trim();
+    let port = null;
+    if (portRaw) {
+        port = parseInt(portRaw, 10);
+        if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`FREEIPA_PORT: ожидается число 1–65535 (получено "${portRaw}")`);
+    }
+
+    const schemeRaw = String(env.FREEIPA_SCHEME || '').trim().toLowerCase();
+    if (schemeRaw && !['ldap', 'ldaps'].includes(schemeRaw)) {
+        throw new Error(`FREEIPA_SCHEME: допустимы ldap или ldaps (получено "${schemeRaw}")`);
+    }
+
+    // Схема по умолчанию: порт 389 -> ldap, иначе ldaps (в FreeIPA обычный порт TLS — 636).
+    const scheme = schemeRaw || (port === 389 ? 'ldap' : 'ldaps');
+    const finalPort = port || (scheme === 'ldap' ? 389 : 636);
+    return { url: `${scheme}://${host}:${finalPort}` };
+}
+
 // Читает .env-конфигурацию. Возвращает null, если FreeIPA выключен (FREEIPA_ENABLED не true).
 // Бросает понятную ошибку, если включён, но обязательные параметры не заданы или некорректны.
 function loadConfig(env = process.env) {
     if (!bool(env.FREEIPA_ENABLED)) return null;
 
-    const url = String(env.FREEIPA_URL || '').trim();
-    if (!url) throw new Error('FREEIPA_URL не задан (например ldaps://ipa.example.com:636)');
-    if (!/^ldaps?:\/\//i.test(url)) throw new Error(`FREEIPA_URL: ожидается ldap:// или ldaps:// (получено "${url}")`);
+    const built = buildUrl(env);
+    if (!built) {
+        throw new Error('FREEIPA_URL не задан (например ldaps://ipa.example.com:636) — либо укажите FREEIPA_HOST (и при необходимости FREEIPA_SCHEME/FREEIPA_PORT)');
+    }
+    const url = built.url;
 
     const baseDn = String(env.FREEIPA_BASE_DN || '').trim();
     if (!baseDn) throw new Error('FREEIPA_BASE_DN не задан (например dc=example,dc=com)');
@@ -73,6 +110,8 @@ function loadConfig(env = process.env) {
         bindDn,
         bindPassword,
         userFilter: filterTpl,
+        // StartTLS — только если задано явно (как раньше): менять умолчание нельзя,
+        // иначе уже работающие конфигурации ldap:// внезапно попросят TLS.
         startTLS: bool(env.FREEIPA_STARTTLS),
         timeout: int(env.FREEIPA_TIMEOUT_MS, 5000),
         tlsOptions: Object.keys(tlsOptions).length ? tlsOptions : undefined,
@@ -187,4 +226,4 @@ async function findUser(cfg, username, deps = {}) {
     };
 }
 
-module.exports = { loadConfig, authenticate, findUser, bool };
+module.exports = { loadConfig, authenticate, findUser, buildUrl, bool };

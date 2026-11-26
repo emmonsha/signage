@@ -50,6 +50,52 @@ test('loadConfig: URL без схемы ldap -> ошибка', () => {
     assert.throws(() => loadConfig({ ...baseEnv, FREEIPA_URL: 'ipa.example.com' }), /ldap:\/\//);
 });
 
+// --- адрес каталога по частям: удобно при нестандартных портах ---
+
+const partsEnv = { FREEIPA_ENABLED: 'true', FREEIPA_BASE_DN: 'dc=example,dc=com' };
+
+test('адрес по частям: FREEIPA_HOST без порта -> ldaps:636 по умолчанию', () => {
+    const cfg = loadConfig({ ...partsEnv, FREEIPA_HOST: 'ipa.example.com' });
+    assert.equal(cfg.url, 'ldaps://ipa.example.com:636');
+});
+
+test('адрес по частям: свой порт сохраняется', () => {
+    const cfg = loadConfig({ ...partsEnv, FREEIPA_HOST: 'ipa.example.com', FREEIPA_PORT: '1636' });
+    assert.equal(cfg.url, 'ldaps://ipa.example.com:1636');
+});
+
+test('адрес по частям: порт 389 без схемы -> ldap:389', () => {
+    const cfg = loadConfig({ ...partsEnv, FREEIPA_HOST: 'ipa.example.com', FREEIPA_PORT: '389' });
+    assert.equal(cfg.url, 'ldap://ipa.example.com:389');
+});
+
+test('адрес по частям: схема задана явно (ldap на своём порту)', () => {
+    const cfg = loadConfig({ ...partsEnv, FREEIPA_HOST: 'ipa.example.com', FREEIPA_SCHEME: 'ldap', FREEIPA_PORT: '1389' });
+    assert.equal(cfg.url, 'ldap://ipa.example.com:1389');
+    // StartTLS не включается сам: это отдельная настройка, иначе сломали бы чужие конфигурации
+    assert.equal(cfg.startTLS, false);
+});
+
+test('адрес по частям: FREEIPA_URL имеет приоритет', () => {
+    const cfg = loadConfig({ ...partsEnv, FREEIPA_URL: 'ldap://other:1389', FREEIPA_HOST: 'ipa.example.com', FREEIPA_PORT: '1636' });
+    assert.equal(cfg.url, 'ldap://other:1389');
+});
+
+test('адрес по частям: FREEIPA_HOST со схемой/портом -> понятная ошибка', () => {
+    assert.throws(() => loadConfig({ ...partsEnv, FREEIPA_HOST: 'ldaps://ipa.example.com:636' }), /FREEIPA_HOST/);
+});
+
+test('адрес по частям: неверный порт и схема -> ошибки', () => {
+    assert.throws(() => loadConfig({ ...partsEnv, FREEIPA_HOST: 'ipa', FREEIPA_PORT: '0' }), /FREEIPA_PORT/);
+    assert.throws(() => loadConfig({ ...partsEnv, FREEIPA_HOST: 'ipa', FREEIPA_PORT: '70000' }), /FREEIPA_PORT/);
+    assert.throws(() => loadConfig({ ...partsEnv, FREEIPA_HOST: 'ipa', FREEIPA_PORT: 'порт' }), /FREEIPA_PORT/);
+    assert.throws(() => loadConfig({ ...partsEnv, FREEIPA_HOST: 'ipa', FREEIPA_SCHEME: 'http' }), /FREEIPA_SCHEME/);
+});
+
+test('адрес по частям: ни URL, ни хоста -> отказ старта', () => {
+    assert.throws(() => loadConfig(partsEnv), /FREEIPA_URL/);
+});
+
 test('loadConfig: фильтр без {username} -> ошибка', () => {
     assert.throws(() => loadConfig({ ...baseEnv, FREEIPA_USER_FILTER: '(uid=admin)' }), /\{username\}/);
 });

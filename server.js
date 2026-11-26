@@ -357,13 +357,15 @@ const sessionCred = () => crypto.createHash('sha256')
 //   2) для входа через каталог — не убран ли человек из списка допущенных.
 // Второе важно, потому что убрать доступ из админки можно в любой момент, а сессия
 // у него уже открыта: без проверки он продолжил бы работать до истечения cookie.
-function sessionValid(req) {
-    if (!req.session || !req.session.authorized) return false;
-    if (req.session.cred !== sessionCred()) return false;
-    const u = req.session.user || {};
+// Работает и с объектом сессии запроса, и с записью из хранилища (панель «Пользователи»).
+function sessionValidFor(s) {
+    if (!s || !s.authorized) return false;
+    if (s.cred !== sessionCred()) return false;
+    const u = s.user || {};
     if (u.via === 'freeipa' && !users.isAllowed(usersReg, u.username, accessMode())) return false;
     return true;
 }
+const sessionValid = req => sessionValidFor(req.session);
 
 // Простое ограничение попыток входа: отдельно по IP и по паре IP+логин (защита от перебора паролей).
 const fails = new Map();
@@ -424,17 +426,24 @@ app.post('/api/login', async (req, res) => {
     const keys = [req.ip, failKey(req, username)];                 // блокируем и по IP, и по IP+логину
     if (keys.some(throttled)) return res.status(429).json({ success: false, message: 'Слишком много попыток, подождите' });
     const r = await checkCredentials(username, req.body.password);
-    if (r.ok) {
-        keys.forEach(k => fails.delete(k));
+    if (!r.ok) {
+        keys.forEach(bumpFail);
+        return res.status(401).json({ success: false, message: r.reason || 'Неверный логин или пароль' });
+    }
+    keys.forEach(k => fails.delete(k));
+    // Новый идентификатор сессии после входа (защита от фиксации сессии): если злоумышленник
+    // заранее навязал жертве свой sid, после входа он станет недействителен.
+    req.session.regenerate(err => {
+        if (err) { console.error('Не удалось пересоздать сессию:', err.message); return res.status(500).json({ success: false, message: 'Ошибка входа' }); }
         req.session.authorized = true;
         req.session.cred = sessionCred();                         // привязка к текущему паролю: смена пароля отзывает сессию
         req.session.user = r.user;                                // для отображения в админке/логах
         req.session.user.via = r.via;                             // источник входа: freeipa | local
+        // Метаданные для панели «Пользователи»: видно, кто и откуда сейчас работает.
+        req.session.meta = { loginAt: Date.now(), ip: req.ip, ua: String(req.get('user-agent') || '').slice(0, 200) };
         console.log(`Вход разрешён: ${r.user.username} (${r.via}) с ${req.ip}`);
-        return res.json({ success: true, user: { username: r.user.username, displayName: r.user.displayName } });
-    }
-    keys.forEach(bumpFail);
-    res.status(401).json({ success: false, message: r.reason || 'Неверный логин или пароль' });
+        res.json({ success: true, user: { username: r.user.username, displayName: r.user.displayName } });
+    });
 });
 app.post('/api/logout', (req, res) => req.session.destroy(() => res.json({ success: true })));
 
@@ -484,6 +493,69 @@ const accessInfo = () => ({
 app.get('/api/users', checkAuth, (req, res) => {
     res.set('Cache-Control', 'no-store');
     res.json({ success: true, ...accessInfo(), users: usersReg.users });
+});
+
+// Активные сессии — для панели «Пользователи»: видно, кто сейчас работает.
+// Наружу отдаём не сам id сессии (это фактически пароль от неё), а его хэш: по нему
+// можно завершить сессию, но угнать её нельзя.
+const sidHash = sid => crypto.createHash('sha256').update('signage-sid:' + sid).digest('hex').slice(0, 16);
+
+function listSessions(cb) {
+    sessionStore.all((err, all) => {
+        if (err) return cb(err);
+        const out = [];
+        for (const [sid, s] of Object.entries(all || {})) {
+            if (!s || !s.authorized) continue;
+            // Недействительную сессию (сменился пароль / человека убрали из списка) не показываем,
+            // а сразу удаляем: иначе список засоряется мёртвыми записями от старых версий или
+            // от прежних входов, а такая сессия всё равно не даёт доступа.
+            if (!sessionValidFor(s)) { try { sessionStore.destroy(sid, () => {}); } catch { /* уже удалена */ } continue; }
+            const u = s.user || {};
+            const exp = s.cookie && s.cookie.expires ? Date.parse(s.cookie.expires) : null;
+            out.push({
+                id: sidHash(sid),
+                username: u.username || ADMIN_USER,
+                displayName: u.displayName || u.username || ADMIN_USER,
+                via: u.via || 'local',
+                loginAt: (s.meta && s.meta.loginAt) || null,
+                ip: (s.meta && s.meta.ip) || null,
+                ua: (s.meta && s.meta.ua) || null,
+                expires: exp
+            });
+        }
+        out.sort((a, b) => (b.loginAt || 0) - (a.loginAt || 0));
+        cb(null, out, Date.now());
+    });
+}
+
+app.get('/api/users/sessions', checkAuth, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    listSessions((err, sessions) => {
+        if (err) return res.status(500).json({ success: false, message: 'Не удалось прочитать сессии' });
+        const me = sidHash(req.sessionID);
+        res.json({ success: true, sessions: sessions.map(s => ({ ...s, current: s.id === me })) });
+    });
+});
+
+// Завершить чужую сессию (например, потерян ноутбук или вход с чужого адреса).
+// Подтверждение паролем — как у других опасных действий; себя так завершить нельзя.
+app.post('/api/users/sessions/revoke', checkAuth, async (req, res) => {
+    const id = String((req.body || {}).id || '').trim();
+    if (!id) return res.status(400).json({ success: false, message: 'Не указана сессия' });
+    if (id === sidHash(req.sessionID)) return res.status(400).json({ success: false, message: 'Это ваша текущая сессия — используйте «Выйти»' });
+    const key = `sess-revoke|${req.ip}`;
+    if (throttled(key)) return res.status(429).json({ success: false, message: 'Слишком много попыток, подождите' });
+    if (!(await confirmPassword(req, (req.body || {}).password))) {
+        bumpFail(key);
+        console.warn(`Отказ завершения сессии: неверный пароль (${req.ip})`);
+        return res.status(403).json({ success: false, message: 'Неверный пароль' });
+    }
+    fails.delete(key);
+    const found = await new Promise(ok => sessionStore.all((e, all) => ok(e ? null : Object.keys(all || {}).find(s => sidHash(s) === id))));
+    if (!found) return res.status(404).json({ success: false, message: 'Сессия не найдена (возможно, уже завершена)' });
+    await new Promise(ok => sessionStore.destroy(found, ok));
+    console.log(`Сессия завершена вручную (${req.session.user ? req.session.user.username : '?'} с ${req.ip}): ${id}`);
+    res.json({ success: true });
 });
 
 // Добавить учётную запись в список допущенных. Тело: { username, note? }.
