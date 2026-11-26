@@ -37,6 +37,7 @@ SIGNAGE_REPO=https://github.com/USER/signage.git \
 | `FREEIPA_*`, `DEPLOY_*` | настройки каталога и автодеплоя (как в `.env`) | — |
 | `SIGNAGE_YES=1` | без вопросов (автоматизация) | `0` |
 | `SIGNAGE_NO_UP=1` | только собрать, не запускать | `0` |
+| `SIGNAGE_BUILD_CMD`, `SIGNAGE_UP_CMD` | переопределить команды сборки/запуска (напр. с `-f docker-compose.deploy.yml`) | `docker compose build`, `docker compose up -d` |
 
 Пример: развернуть в `/opt/signage`, порт 8080, сгенерировать пароль и ограничить админку сетью:
 

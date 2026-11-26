@@ -167,7 +167,7 @@ FREEIPA_ACCESS_MODE=auto             # auto | list | open — кого пуск�
 ## Проверка
 
 ```bash
-npm test                                  # юнит-тесты freeipa.js (17 шт., без сети)
+npm test                                  # юнит-тесты freeipa.js (25 шт., без сети)
 docker compose up -d && docker compose logs -f signage
 
 curl -s localhost:3000/api/auth           # {"mode":"both","username":true}
