@@ -4,8 +4,6 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Вход</title>
 <style>
- ========== -->
-<style>
   :root {
     --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     --bg: #d9e1ec;
@@ -41,6 +39,11 @@
     font: inherit;
   }
   input:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus-ring); }
+  /* Поле логина показывается по режиму входа, который сервер уже знает (data-auth-mode).
+     Так форма детерминирована и не зависит от успешного /api/auth и таймингов. */
+  #user { display: none; }
+  body[data-auth-mode="freeipa"] #user,
+  body[data-auth-mode="both"] #user { display: block; }
   button {
     width: 100%; min-height: 44px;
     background: var(--accent); color: #fff;
@@ -59,30 +62,21 @@
 
 </style>
 </head>
-<body>
+<body data-auth-mode="__AUTH_MODE__">
 <form class="box" onsubmit="login(event)">
   <h2>Управление экранами</h2>
-  <input type="text" id="user" placeholder="Логин" autocomplete="username" style="display:none">
+  <input type="text" id="user" placeholder="Логин" autocomplete="username">
   <input type="password" id="pass" placeholder="Пароль" autocomplete="current-password" autofocus>
   <button type="submit" id="btn">Войти</button>
   <p class="err" id="err"></p>
-  <p class="hint" id="hint"></p>
+  <p class="hint" id="hint">__AUTH_HINT__</p>
 </form>
 <script>
-// /api/auth сообщает, нужен ли ввод логина (вход через FreeIPA) и какой источник активен.
-(async () => {
-  try {
-    const a = await (await fetch('/api/auth')).json();
-    if (a.username) {
-      const u = document.getElementById('user');
-      u.style.display = '';
-      document.getElementById('pass').removeAttribute('autofocus');
-      u.focus();
-    }
-    document.getElementById('hint').textContent =
-      a.mode === 'freeipa' ? 'Вход по учётной записи FreeIPA' :
-      a.mode === 'both' ? 'FreeIPA или локальный администратор' : '';
-  } catch { /* сервер недоступен — форма всё равно отрисуется */ }
+// Логин и подсказка отрисованы на сервере по AUTH_MODE (детерминированно),
+// поэтому форма корректна даже без JS. Здесь — только удобство фокуса.
+(function () {
+  const u = document.getElementById('user'), p = document.getElementById('pass');
+  if (u && getComputedStyle(u).display !== 'none') { p.removeAttribute('autofocus'); u.focus(); }
 })();
 
 async function login(e) {

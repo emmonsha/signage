@@ -372,6 +372,7 @@ app.post('/api/login', async (req, res) => {
         keys.forEach(k => fails.delete(k));
         req.session.authorized = true;
         req.session.user = r.user;                                // для отображения в админке/логах
+        req.session.user.via = r.via;                             // источник входа: freeipa | local
         console.log(`Вход разрешён: ${r.user.username} (${r.via}) с ${req.ip}`);
         return res.json({ success: true, user: { username: r.user.username, displayName: r.user.displayName } });
     }
@@ -403,8 +404,39 @@ async function confirmPassword(req, password) {
 // Публичная подсказка для страницы входа: нужен ли ввод логина и какой источник активен.
 app.get('/api/auth', (req, res) => res.json({ mode: AUTH_MODE, username: IPA_LOGIN || AUTH_MODE === 'both' }));
 
-app.get('/admin', (req, res) =>
-    res.sendFile(path.join(PUBLIC, req.session.authorized ? 'admin.html' : 'login.html')));
+// Текущий пользователь сессии — для значка пользователя и кнопки выхода в админке.
+// 401 без авторизации: клиент понимает, что пора показать страницу входа.
+app.get('/api/me', (req, res) => {
+    if (!req.session.authorized) return res.status(401).json({ success: false });
+    const u = req.session.user || {};
+    res.json({ success: true, username: u.username || ADMIN_USER, displayName: u.displayName || u.username || ADMIN_USER, via: u.via || null });
+});
+
+// Страница входа. Логин/подсказка отрисовываются по режиму AUTH_MODE прямо в HTML,
+// а не только через /api/auth: иначе медленный/неудачный запрос оставлял форму без поля логина.
+function renderLogin() {
+    const file = path.join(PUBLIC, 'login.html');
+    const hint = AUTH_MODE === 'freeipa' ? 'Вход по учётной записи FreeIPA'
+        : AUTH_MODE === 'both' ? 'FreeIPA или локальный администратор' : '';
+    try {
+        return fs.readFileSync(file, 'utf8')
+            .replace('__AUTH_MODE__', AUTH_MODE)
+            .replace('__AUTH_HINT__', hint);
+    } catch {
+        return fs.readFileSync(file);   // на всякий случай отдаём файл как есть
+    }
+}
+
+app.get('/admin', (req, res) => {
+    if (req.session.authorized) return res.sendFile(path.join(PUBLIC, 'admin.html'));
+    res.type('html').send(renderLogin());
+});
+
+// Явная страница входа (устаревшие ссылки вида /login и превью в UX-аудите).
+app.get('/login', (req, res) => {
+    if (req.session.authorized) return res.redirect('/admin');
+    res.type('html').send(renderLogin());
+});
 
 // Страница-плеер для медиаплееров: http://IP:3000/player?token=<токен экрана>
 app.get('/player', (req, res) => res.sendFile(path.join(PUBLIC, 'player.html')));

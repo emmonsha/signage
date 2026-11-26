@@ -264,7 +264,78 @@ header {
   border-bottom: 1px solid var(--border);
 }
 header h1 { margin: 0; font-size: var(--fs-xl); font-weight: 650; letter-spacing: -.01em; }
-header > div { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+header > div { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
+
+/* ---------- Значок пользователя с выпадающим выходом ---------- */
+.user { position: relative; }
+.user-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 36px;
+  padding: 4px 10px 4px 4px;
+  font: inherit;
+  font-size: var(--fs-s);
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+}
+.user-btn:hover { background: var(--surface-3); }
+.user-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: var(--fs-s);
+  font-weight: 650;
+  line-height: 1;
+  text-transform: uppercase;
+}
+.user-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-caret { font-size: 10px; color: var(--text-muted); }
+.user-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  min-width: 200px;
+  padding: var(--sp-1);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-2);
+}
+.user-menu[hidden] { display: none !important; }
+.user-menu .who {
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--sp-1);
+}
+.user-menu .who b { display: block; font-size: var(--fs-s); }
+.user-menu .who small { color: var(--text-muted); font-size: var(--fs-xs); }
+.user-menu .item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--sp-2) var(--sp-3);
+  font: inherit;
+  font-size: var(--fs-s);
+  color: var(--text);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+.user-menu .item:hover { background: var(--surface-3); }
+.user-menu .item.danger { color: var(--danger); }
+.user-menu .item.danger:hover { background: var(--danger-subtle); }
 
 /* ---------- Сетка карточек ---------- */
 .screens {
@@ -632,7 +703,17 @@ details.snapdet > summary { color: var(--accent); }
   <div>
     <button class="btn deploy" id="deployBtn" hidden onclick="doDeploy()">⬆ Обновить систему</button>
     <button class="btn success" onclick="addScreen()">＋ Экран</button>
-    <button class="btn" onclick="logout()">Выйти</button>
+    <div class="user" id="userBox" hidden>
+      <button class="user-btn" id="userBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="userMenu" onclick="toggleUserMenu(event)">
+        <span class="user-avatar" id="userAvatar" aria-hidden="true">А</span>
+        <span class="user-name" id="userName"></span>
+        <span class="user-caret" aria-hidden="true">▾</span>
+      </button>
+      <div class="user-menu" id="userMenu" role="menu" hidden>
+        <div class="who"><b id="userFull"></b><small id="userSource"></small></div>
+        <button class="item danger" role="menuitem" onclick="logout()">Выйти</button>
+      </div>
+    </div>
   </div>
 </header>
 <div id="deployBox" hidden class="box">
@@ -1234,6 +1315,46 @@ function markPlaying(i) {
 }
 
 async function logout() { await fetch('/api/logout', { method: 'POST' }); location.reload(); }
+
+// ---------- значок пользователя и выпадающее меню ----------
+// Имя берём из /api/me; если запрос не удался (страница и так только для авторизованных),
+// значок всё равно показываем — выход должен быть доступен всегда.
+function toggleUserMenu(e) {
+  if (e) e.stopPropagation();
+  const menu = $('userMenu'), btn = $('userBtn');
+  const open = menu.hidden;
+  menu.hidden = !open;
+  btn.setAttribute('aria-expanded', String(open));
+  if (open) { const first = menu.querySelector('.item'); if (first) first.focus(); }
+}
+function closeUserMenu() {
+  const menu = $('userMenu'); if (!menu || menu.hidden) return;
+  menu.hidden = true;
+  const btn = $('userBtn'); if (btn) { btn.setAttribute('aria-expanded', 'false'); btn.focus(); }
+}
+function paintUser(u) {
+  const box = $('userBox'); if (!box) return;
+  const name = (u && (u.displayName || u.username)) || '';
+  $('userName').textContent = name;
+  $('userFull').textContent = name || 'Пользователь';
+  $('userAvatar').textContent = (name.trim()[0] || 'А').toUpperCase();
+  $('userSource').textContent = u && u.via === 'freeipa' ? 'FreeIPA' : 'Локальная учётка';
+  box.hidden = false;
+}
+(function initUserMenu() {
+  document.addEventListener('click', e => {
+    const box = $('userBox');
+    if (box && !box.contains(e.target)) closeUserMenu();
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeUserMenu(); });
+  (async () => {
+    try {
+      const r = await fetch('/api/me');
+      if (r.ok) { paintUser(await r.json()); return; }
+    } catch { /* сеть/сервер — покажем выход без имени */ }
+    paintUser(null);
+  })();
+})();
 
 // ---------- доступность модалок: Escape и клик по затемнению ----------
 const MODALS = [
